@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>World Map • 10° Grid • CSV + Bands (zoom limit + help)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <!-- Papa Parse -->
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <!-- MarkerCluster -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { position: absolute; inset: 120px 0 0 0; }
+    #controls {
+      position: absolute; top: 0; left: 0; right: 0; height: 120px;
+      display: grid; grid-template-rows: auto auto auto; gap: 6px;
+      padding: 8px 12px; background: #ffffffcc; backdrop-filter: blur(4px);
+      z-index: 1100; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      border-bottom: 1px solid #ddd;
+    }
+    #row1, #row2, #row3 { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    #dropzone { border: 2px dashed #bbb; border-radius: 8px; padding: 8px 12px; cursor: copy; }
+    #dropzone.drag { border-color: #2a7; background: #2a71; }
+    .status { font-size: 12px; color: #444; }
+    .error { color: #b00020; font-weight: 600; }
+    .gridlabel { font: 12px/1.1 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+                 color: #222; text-shadow: 0 0 2px #fff, 0 0 3px #fff; white-space: nowrap; }
+    #legend { display: flex; align-items: center; gap: 14px; }
+    .legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #222; }
+    .swatch { width: 12px; height: 12px; border-radius: 50%; border: 1px solid #0002; }
+    .filter { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+    #skipReport { font-size: 12px; color: #b00020; }
+
+    /* Help Modal (isolated) */
+    #helpModal { display:none; position:fixed; z-index:9999; inset:0; background: rgba(0,0,0,0.4); }
+    #helpContent {
+      background:#fff; margin:8% auto; padding:20px; border:1px solid #888;
+      width: min(720px, 92vw); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.2);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color:#222;
+    }
+    #helpContent h2 { margin-top:0; }
+    #helpClose { float:right; border:none; background:#eee; padding:6px 10px; border-radius:6px; cursor:pointer; }
+    #helpClose:hover { background:#e0e0e0; }
+    #helpList p { margin:.4rem 0; }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <div id="row1">
+      <label><strong>Upload CSV:</strong> <input id="csvInput" type="file" accept=".csv"></label>
+      <div id="dropzone">…or drag & drop CSV here</div>
+      <button id="clearBtn">Clear markers</button>
+      <button id="downloadBtn" disabled>Download normalized CSV</button>
+      <button id="helpBtn" title="Open user guide">Help</button>
+      <span class="status" id="status">Headers: <code>lat, lon, label, (band type)</code>. Abbreviations OK.</span>
+    </div>
+    <div id="row2">
+      <div id="legend" aria-label="Band-type legend"></div>
+      <span>|</span>
+      <label class="filter"><input type="checkbox" id="flt-ring" checked> ring</label>
+      <label class="filter"><input type="checkbox" id="flt-stripe" checked> stripe</label>
+      <label class="filter"><input type="checkbox" id="flt-both" checked> both</label>
+      <label class="filter"><input type="checkbox" id="flt-none" checked> none</label>
+    </div>
+    <div id="row3">
+      <span id="skipReport"></span>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <script>
+    // --- Map (only change: minZoom 2 so gridlines never disappear) ---
+    const map = L.map('map', { center: [20, 0], zoom: 2, minZoom: 2, worldCopyJump: true });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      { maxZoom: 19, attribution:'&copy; OpenStreetMap' }).addTo(map);
+
+    // Panes: grid (350) < shading (365) < markers/clusters (default)
+    map.createPane('gridPane');  map.getPane('gridPane').style.zIndex = 350;
+    map.createPane('shadePane'); map.getPane('shadePane').style.zIndex = 365;
+
+    // --- 10° grid ---
+    const gridStyle = { pane: 'gridPane', color: '#2b2b2b', weight: 1, opacity: 0.6, dashArray: '4,4' };
+    for (let lon=-180; lon<=180; lon+=10) L.polyline([[-85,lon],[85,lon]], gridStyle).addTo(map);
+    for (let lat=-80; lat<=80; lat+=10) L.polyline([[lat,-180],[lat,180]], gridStyle).addTo(map);
+    const labelOpts = { pane: 'gridPane', interactive: false };
+    const fmtDeg = d => d>0? `${d}°` : d<0? `${Math.abs(d)}°` : '0°';
+    for (let lon=-180; lon<=180; lon+=30)
+      L.marker([0, lon], { ...labelOpts, icon: L.divIcon({ className:'gridlabel', html:`${fmtDeg(lon)}E/W`, iconSize:[0,0] }) }).addTo(map);
+    for (let lat=-60; lat<=60; lat+=30)
+      L.marker([lat, 0], { ...labelOpts, icon: L.divIcon({ className:'gridlabel', html:`${fmtDeg(lat)}N/S`, iconSize:[0,0] }) }).addTo(map);
+
+    // --- Shading layers ---
+    const ringLayer   = L.featureGroup({ pane: 'shadePane' }).addTo(map);
+    const stripeLayer = L.featureGroup({ pane: 'shadePane' }).addTo(map);
+    const SHADE_STYLE = { pane:'shadePane', color:'#246', weight:0, fillColor:'#246', fillOpacity:0.18 };
+
+    // --- Cluster with spiderfy on click ---
+    const cluster = L.markerClusterGroup({
+      zoomToBoundsOnClick: false,
+      spiderfyOnEveryZoom: false,
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+      disableClusteringAtZoom: 12,
+      maxClusterRadius: 60
+    }).addTo(map);
+    cluster.on('clusterclick', (e) => e.layer.spiderfy());
+
+    // Marker pools by type (we add/remove markers directly to the cluster)
+    let pool = null; // { ring:Set<Marker>, stripe:Set<Marker>, both:Set<Marker>, none:Set<Marker> }
+    function initPools() { pool = { ring:new Set(), stripe:new Set(), both:new Set(), none:new Set() }; }
+
+    // Colors / legend
+    const BAND_COLORS = { ring:'#2f7ed8', stripe:'#f28f43', both:'#8e44ad', none:'#7f8c8d' };
+    const legendEl = document.getElementById('legend');
+    const counts = { ring:0, stripe:0, both:0, none:0, total:0 };
+    function renderLegend() {
+      legendEl.innerHTML =
+        ['ring','stripe','both','none'].map(k =>
+          `<span class="legend-item"><span class="swatch" style="background:${BAND_COLORS[k]}"></span>${k} (${counts[k]})</span>`
+        ).join('') + (counts.total ? `&nbsp;&nbsp;<span class="legend-item">total ${counts.total}</span>` : '');
+    }
+    renderLegend();
+
+    // Marker factory
+    function makeMarker(lat, lon, color, labelText) {
+      const icon = L.divIcon({
+        className: '',
+        html: `<svg width="16" height="16" viewBox="0 0 16 16" style="display:block">
+                 <circle cx="8" cy="8" r="5.5" fill="${color}" stroke="black" stroke-opacity=".25"/>
+               </svg>`,
+        iconSize: [16,16], iconAnchor: [8,8]
+      });
+      const m = L.marker([lat, lon], { icon, riseOnHover:true });
+      if (labelText) m.bindTooltip(String(labelText), { permanent:true, direction:'right', offset:[10,0], className:'gridlabel' });
+      return m;
+    }
+
+    // Controls
+    const csvInput = document.getElementById('csvInput');
+    const dropzone = document.getElementById('dropzone');
+    const statusEl = document.getElementById('status');
+    const clearBtn = document.getElementById('clearBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const skipReportEl = document.getElementById('skipReport');
+
+    // Filters
+    const flt = {
+      ring: document.getElementById('flt-ring'),
+      stripe: document.getElementById('flt-stripe'),
+      both: document.getElementById('flt-both'),
+      none: document.getElementById('flt-none')
+    };
+    Object.entries(flt).forEach(([type, el]) => el.addEventListener('change', () => {
+      if (!pool) return;
+      if (el.checked) { pool[type].forEach(m => cluster.addLayer(m)); }
+      else            { pool[type].forEach(m => cluster.removeLayer(m)); }
+    }));
+
+    // Re-upload same file fix
+    csvInput.addEventListener('click', () => { csvInput.value = ''; });
+
+    // Clear: clear cluster completely and reset pools/state
+    clearBtn.addEventListener('click', () => {
+      cluster.clearLayers();
+      initPools();
+      ringLayer.clearLayers(); stripeLayer.clearLayers();
+      counts.ring = counts.stripe = counts.both = counts.none = counts.total = 0;
+      renderLegend();
+      setStatus('Markers and shading cleared.');
+      csvInput.value = '';
+      downloadBtn.disabled = true;
+      normalizedRows = [];
+      skipReportEl.textContent = '';
+    });
+
+    // Init empty pools
+    initPools();
+
+    csvInput.addEventListener('change', () => csvInput.files?.[0] && handleFile(csvInput.files[0]));
+    ['dragenter','dragover'].forEach(evt =>
+      dropzone.addEventListener(evt, e => { e.preventDefault(); e.dataTransfer.dropEffect='copy'; dropzone.classList.add('drag'); })
+    );
+    ['dragleave','drop'].forEach(evt =>
+      dropzone.addEventListener(evt, e => { e.preventDefault(); dropzone.classList.remove('drag'); })
+    );
+    dropzone.addEventListener('drop', e => { const f = e.dataTransfer.files?.[0]; if (f) handleFile(f); });
+
+    function handleFile(file) {
+      setStatus(`Loading ${file.name}…`);
+      Papa.parse(file, { header:true, worker:true, dynamicTyping:true, skipEmptyLines:true,
+        complete: (res) => processRows(res),
+        error: (err) => setError('CSV parse error: ' + err.message)
+      });
+    }
+
+    let normalizedRows = [];
+
+    function processRows(results) {
+      try {
+        const fields = (results.meta.fields || []).map(s => String(s||'').trim());
+        if (!results.data.length) return setError('No rows found in CSV.');
+
+        const H = mapHeadersFlexible(fields);
+        if (!H.lat || !H.lon) return setError('Missing latitude/longitude headers.');
+        setStatus(`Detected headers → lat: "${H.lat}", lon: "${H.lon}", label: "${H.label ?? '(none)'}", band: "${H.bandType ?? '(default both)'}"`);
+
+        // Reset cluster/pools & state before loading new data
+        cluster.clearLayers();
+        initPools();
+        counts.ring = counts.stripe = counts.both = counts.none = counts.total = 0;
+        ringLayer.clearLayers(); stripeLayer.clearLayers();
+        normalizedRows = [];
+        let skipped = 0, skippedRows = [];
+
+        const ringSet = new Set(), stripeSet = new Set();
+
+        results.data.forEach((row, idx) => {
+          const rowNo = idx + 2; // CSV line number
+          const lat = toNum(row[H.lat]); const lonRaw = toNum(row[H.lon]);
+
+          if (!isFinite(lat) || !isFinite(lonRaw)) { skipped++; skippedRows.push(`row ${rowNo}: non-numeric lat/lon`); return; }
+          if (Math.abs(lat) > 90)  { skipped++; skippedRows.push(`row ${rowNo}: latitude ${lat} out of range (-90..90)`); return; }
+          if (Math.abs(lonRaw) > 180) { skipped++; skippedRows.push(`row ${rowNo}: longitude ${lonRaw} out of range (-180..180)`); return; }
+
+          const lon = normLon(lonRaw);
+          const label = safeStr(H.label ? row[H.label] : '');
+
+          const ringLow   = Math.floor(lat / 10) * 10;
+          const stripeLow = Math.floor(lon / 10) * 10;
+
+          const rawBand = H.bandType ? safeStr(row[H.bandType]) : '';
+          const bandType = parseBandType(rawBand);
+
+          // Build shading sets (shading reflects all points)
+          if (bandType === 'ring') ringSet.add(ringLow);
+          else if (bandType === 'stripe') stripeSet.add(stripeLow);
+          else if (bandType === 'both') { ringSet.add(ringLow); stripeSet.add(stripeLow); }
+
+          // Create marker; put in pool; add to cluster if visible
+          const color = BAND_COLORS[bandType] || BAND_COLORS.both;
+          const m = makeMarker(lat, lon, color, label);
+          pool[bandType].add(m);
+          if (flt[bandType].checked) cluster.addLayer(m);
+
+          counts[bandType]++; counts.total++;
+
+          normalizedRows.push({
+            lat: +lat.toFixed(6), lon: +lon.toFixed(6), label,
+            band_type_input: rawBand, band_type_normalized: bandType,
+            ring_low: ringLow, stripe_low: stripeLow
+          });
+        });
+
+        if (counts.total === 0) return setError('Parsed the CSV, but didn’t find any valid rows.');
+
+        // Shading from full dataset
+        drawRings(ringSet); drawStripes(stripeSet);
+
+        renderLegend();
+        const b = cluster.getBounds(); if (b.isValid()) map.fitBounds(b, { padding:[30,30] });
+
+        setStatus(`${counts.total.toLocaleString()} point(s) loaded.` + (skipped ? ` Skipped ${skipped}.` : ''));
+        skipReportEl.textContent = skipped ? ('Skipped → ' + skippedRows.join(' | ')) : '';
+
+        downloadBtn.disabled = false;
+
+      } catch (e) {
+        setError('Error processing CSV: ' + e.message);
+      }
+    }
+
+    // Shading
+    function drawRings(set) {
+      for (const low of set) {
+        const south = Math.max(-85, low), north = Math.min(85, low+10);
+        if (north <= south) continue;
+        L.rectangle([[south,-180],[north,180]], SHADE_STYLE).addTo(ringLayer);
+      }
+    }
+    function drawStripes(set) {
+      for (const low of set) {
+        const west = Math.max(-180, low), east = Math.min(180, low+10);
+        if (east <= west) continue;
+        L.rectangle([[-85,west],[85,east]], SHADE_STYLE).addTo(stripeLayer);
+      }
+    }
+
+    // Export normalized CSV
+    downloadBtn.addEventListener('click', () => {
+      if (!normalizedRows.length) return;
+      const csv = Papa.unparse(normalizedRows, { columns: [
+        'lat','lon','label','band_type_input','band_type_normalized','ring_low','stripe_low'
+      ]});
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = 'normalized_points.csv';
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+    });
+
+    // Header detection
+    function mapHeadersFlexible(fields) {
+      const norm = s => String(s||'').toLowerCase().replace(/[\s._\-\/\\]+/g,'');
+      const indexByNorm = new Map(fields.map((f)=>[norm(f), f]));
+      const pick = (alts) => { for (const a of alts) if (indexByNorm.has(a)) return indexByNorm.get(a); };
+      const lat = pick(['lat','latitude','y']);
+      const lon = pick(['lon','lng','long','longitude','x']);
+      const label = pick(['label','name','title','text','pointlabel']);
+      let bandType = pick(['bandtype','band','ringorstripe','ringstripe','ros','association','assoc','type','rs','markertype']);
+      if (!bandType && fields.length >= 4) bandType = fields[fields.length - 1];
+      return { lat, lon, label, bandType };
+    }
+
+    // Utilities
+    function toNum(v) {
+      if (typeof v === 'number') return v;
+      if (typeof v !== 'string') return NaN;
+      let s = v
+        .replace(/[\u2212\u2010\u2011\u2012\u2013\u2014\u2015]/g, '-')   // dashes → '-'
+        .replace(/[\u00A0\u1680\u2000-\u200B\u202F\u205F\u2060\u3000\uFEFF]/g, ' ') // unicode spaces → space
+        .trim();
+      const m = s.match(/^([+-]?\d+(?:\.\d+)?)(?:\s*([NSEWnsew]))?$/);
+      if (!m) return parseFloat(s);
+      let n = parseFloat(m[1]);
+      const hemi = (m[2]||'').toUpperCase();
+      if (hemi==='S'||hemi==='W') n = -Math.abs(n);
+      if (hemi==='N'||hemi==='E') n =  Math.abs(n);
+      return n;
+    }
+    const safeStr = v => (v==null? '' : String(v));
+    const normLon = lon => { let L=lon; if (!isFinite(L)) return lon; L=((L+180)%360+360)%360-180; if (L===180) L=-180; return L; };
+
+    function parseBandType(raw) {
+      const s = String(raw || '').trim().toLowerCase().replace(/\s+/g, '');
+      if (!s) return 'both';
+      if (s === 'rs' || s === 'sr') return 'both';
+      if (s.startsWith('n')) return 'none';
+      if (s.startsWith('b')) return 'both';
+      if (s.startsWith('s')) return 'stripe';
+      if (s.startsWith('r')) return 'ring';
+      if (s.includes('stripe')) return 'stripe';
+      if (s.includes('ring'))   return 'ring';
+      const hasR = s.includes('r'), hasS = s.includes('s');
+      if (hasR && hasS) return 'both';
+      if (hasR) return 'ring';
+      if (hasS) return 'stripe';
+      return 'both';
+    }
+
+    function setStatus(msg){ statusEl.textContent = msg; statusEl.className = 'status'; }
+    function setError(msg){ statusEl.textContent = msg; statusEl.className = 'status error'; }
+  </script>
+
+  <!-- Help Modal (independent) -->
+  <div id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+    <div id="helpContent">
+      <button id="helpClose" aria-label="Close help">Close</button>
+      <h2 id="helpTitle">User Guide – Map Tool</h2>
+      <div id="helpList">
+        <p><strong>Uploading a CSV</strong><br>
+        Use “Choose File” or drag &amp; drop. Required columns: <code>lat</code>, <code>lon</code>, <code>label</code>, <code>band_type</code>.
+        Band type accepts <code>ring</code>, <code>stripe</code>, <code>both</code>, <code>none</code> (abbreviations OK, case-insensitive).</p>
+
+        <p><strong>Marker colors</strong><br>
+        Blue = ring, Orange = stripe, Purple = both, Gray = none.</p>
+
+        <p><strong>Shading</strong><br>
+        Ring shades the 10° latitude band; Stripe shades the 10° longitude band; Both shades both. A band is shaded once even with multiple points.</p>
+
+        <p><strong>Overlapping points</strong><br>
+        Nearby points are clustered. Click a cluster to fan out (spiderfy) or zoom in to separate.</p>
+
+        <p><strong>Controls</strong><br>
+        <b>Clear markers</b> removes all markers and shading. <b>Download normalized CSV</b> exports a cleaned copy with normalized values and 10° bins. Use the checkboxes to show/hide categories.</p>
+
+        <p><strong>Troubleshooting</strong><br>
+        Re-uploading the same file is supported. If rows are skipped, reasons appear under the toolbar (e.g., out-of-range lat/lon).</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Help modal wiring (does not touch map logic)
+    const helpBtn = document.getElementById('helpBtn');
+    const helpModal = document.getElementById('helpModal');
+    const helpClose = document.getElementById('helpClose');
+    helpBtn.addEventListener('click', () => { helpModal.style.display = 'block'; });
+    helpClose.addEventListener('click', () => { helpModal.style.display = 'none'; });
+    window.addEventListener('click', (e) => { if (e.target === helpModal) helpModal.style.display = 'none'; });
+  </script>
+</body>
+</html>
