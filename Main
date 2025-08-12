@@ -1,638 +1,75 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<title>World Map • 10° Grid • CSV + Bands</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="utf-8" />
+  <title>World Map • 10° Grid • CSV + Bands (zoom limit + help)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-<!-- Leaflet -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 
-<!-- Papa Parse (CSV) -->
-<script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+  <!-- Papa Parse -->
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
 
-<!-- MarkerCluster -->
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
-<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <!-- MarkerCluster -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 
-<style>
-  /* ---------- Layout ---------- */
-  html, body { height: 100%; margin: 0; }
-  /* Use explicit edges (broader support than inset) */
-  #map { position: absolute; top: 172px; right: 0; bottom: 0; left: 0; }
-
-  #controls{
-    position:absolute; top:0; left:0; right:0; height:172px;
-    display:grid; grid-template-rows:auto auto auto; gap:6px;
-    padding:8px 12px; background:#ffffffcc; backdrop-filter:blur(4px);
-    border-bottom:1px solid #ddd; z-index:1100;
-    font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-  }
-  #row1,#row2,#row3{display:flex; align-items:center; gap:12px; flex-wrap:wrap;}
-
-  #dropzone{border:2px dashed #bbb; border-radius:8px; padding:8px 12px; cursor:copy;}
-  #dropzone.drag{border-color:#2a7; background:#2a71;}
-
-  .status{font-size:12px; color:#444;} .error{color:#b00020; font-weight:600;}
-
-  .gridlabel{
-    font:12px/1.1 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-    color:#222; text-shadow:0 0 2px #fff,0 0 3px #fff; white-space:nowrap;
-  }
-
-  #legend{display:flex; align-items:center; gap:14px;}
-  .legend-item{display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#222;}
-  .swatch{width:12px; height:12px; border-radius:50%; border:1px solid #0002;}
-  .filter{display:inline-flex; align-items:center; gap:6px; font-size:13px;}
-  #skipReport{font-size:12px; color:#b00020;}
-
-  #coverage{font-size:12px; color:#222; display:inline-flex; align-items:center; gap:10px;}
-  .badge{display:inline-block; padding:2px 8px; border-radius:999px; background:#eee; border:1px solid #ddd;}
-  .badge.complete{background:#c6f6d5; border-color:#2f855a; color:#22543d; font-weight:600;}
-
-  /* Help modal */
-  #helpModal{display:none; position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,.4);}
-  #helpContent{
-    background:#fff; margin:8% auto; padding:20px; border:1px solid #888;
-    width:min(760px,92vw); border-radius:8px; box-shadow:0 10px 30px rgba(0,0,0,.2);
-    font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; color:#222;
-  }
-  #helpClose{float:right; border:none; background:#eee; padding:6px 10px; border-radius:6px; cursor:pointer;}
-  #helpClose:hover{background:#e0e0e0;}
-  #helpList p{margin:.55rem 0;}
-
-  /* Add/Edit modal */
-  #addModal{display:none; position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,.35);}
-  #addCard{
-    background:#fff; width:min(640px,92vw); margin:8% auto; padding:16px 16px 12px; border-radius:8px;
-    border:1px solid #ddd; box-shadow:0 10px 30px rgba(0,0,0,.2);
-    font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-  }
-  #addCard h3{margin:0;}
-  #addCard .row{display:flex; gap:8px; margin-bottom:8px;} #addCard .row>div{flex:1;}
-  #addCard input,#addCard select{width:100%; padding:6px; box-sizing:border-box;}
-  #addCard .actions{display:flex; gap:8px; justify-content:flex-end; margin-top:10px;}
-
-  /* Color pickers */
-  #colors{display:flex; align-items:center; gap:10px; font-size:12px;}
-  #colors label{display:inline-flex; align-items:center; gap:6px;}
-  #colors input[type="color"]{width:30px; height:20px; border:1px solid #ccc; padding:0;}
-
-  /* Cluster label (transparent, offset so dots are visible) */
-  .cluster-count-wrap{background:transparent; border:none;}
-  .cluster-count{
-    font:12px/1.1 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-    font-weight:700; color:#1a1a1a; padding:0; background:transparent; box-shadow:none;
-    white-space:nowrap; transform:translateY(-18px); text-shadow:0 0 3px #fff; pointer-events:none;
-  }
-</style>
+  <!-- Custom styles -->
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-<!-- ---------- Controls ---------- -->
-<div id="controls">
-  <div id="row1">
-    <label><strong>Upload CSV:</strong> <input id="csvInput" type="file" accept=".csv"></label>
-    <div id="dropzone">…or drag & drop CSV here</div>
-    <button id="exampleBtn" title="Load Example_World_Wonders.csv">Load Example: World Wonders</button>
-    <button id="clearBtn">Clear markers</button>
-    <button id="downloadBtn" disabled>Download normalized CSV</button>
-    <button id="helpBtn">Help</button>
-    <span id="status" class="status">Headers: <code>lat, lon, label, date, comments, (band type)</code>. Extras optional; abbreviations & spaces OK.</span>
-  </div>
-
-  <div id="row2">
-    <div id="legend" aria-label="Band-type legend"></div>
-    <span>|</span>
-    <label class="filter"><input type="checkbox" id="flt-ring" checked> ring</label>
-    <label class="filter"><input type="checkbox" id="flt-stripe" checked> stripe</label>
-    <label class="filter"><input type="checkbox" id="flt-both" checked> both</label>
-    <label class="filter"><input type="checkbox" id="flt-none" checked> none</label>
-    <span>|</span>
-    <span id="coverage" aria-live="polite">
-      <span class="badge" id="ringsBadge">Rings: 0/18 (0%)</span>
-      <span class="badge" id="stripesBadge">Stripes: 0/36 (0%)</span>
-    </span>
-  </div>
-
-  <div id="row3">
-    <div id="colors">
-      <strong>Colors:</strong>
-      <label>Ring <input type="color" id="color-ring"></label>
-      <label>Stripe <input type="color" id="color-stripe"></label>
-      <label>Both <input type="color" id="color-both"></label>
-      <span style="opacity:.7">(“None” stays gray)</span>
+  <div id="controls">
+    <div id="row1">
+      <label><strong>Upload CSV:</strong> <input id="csvInput" type="file" accept=".csv"></label>
+      <div id="dropzone">…or drag & drop CSV here</div>
+      <button id="clearBtn">Clear markers</button>
+      <button id="downloadBtn" disabled>Download normalized CSV</button>
+      <button id="helpBtn" title="Open user guide">Help</button>
+      <span class="status" id="status">Headers: <code>lat, lon, label, (band type)</code>. Abbreviations OK.</span>
     </div>
-    <span id="skipReport"></span>
-  </div>
-</div>
-
-<!-- Where Leaflet draws the map -->
-<div id="map"></div>
-
-<!-- ---------- Help Modal ---------- -->
-<div id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
-  <div id="helpContent">
-    <button id="helpClose" aria-label="Close help">Close</button>
-    <h2 id="helpTitle">User Guide</h2>
-    <div id="helpList">
-      <p><strong>CSV columns</strong> — <code>lat, lon, label, date, comments, band_type</code>. Headers are trimmed and flexible (“latitude”, “lng”, “band”, “type”…). Date & comments are optional.</p>
-      <p><strong>Band type</strong> — <em>ring</em>, <em>stripe</em>, <em>both</em>, <em>none</em>. Abbreviations OK (e.g., r/ri, s/str, b, n). Case-insensitive.</p>
-      <p><strong>Add a point</strong> — right-click the map → <b>Add…</b>. The dialog pre-fills clicked lat/lon. Fill label/band/date/comments → <b>Save</b>.</p>
-      <p><strong>Edit a point</strong> — right-click a marker → <b>Edit…</b>. Edits update icons, shading and the export.</p>
-      <p><strong>Overlaps</strong> — you’ll see tiny colored dots at true locations + a single count label (transparent, lifted). Click the label or any dot to spiderfy.</p>
-      <p><strong>Coverage</strong> — counters track distinct 10° rings (18 total) and 10° stripes (36 total). Hitting 100% highlights “Completed”.</p>
-      <p><strong>Colors</strong> — pick colors for Ring/Stripe/Both; markers & shading update, choices persist locally.</p>
-      <p><strong>Export</strong> — “Download normalized CSV” includes cleaned lat/lon, normalized band, and the ring/stripe bins, plus any adds/edits.</p>
+    <div id="row2">
+      <div id="legend" aria-label="Band-type legend"></div>
+      <span>|</span>
+      <label class="filter"><input type="checkbox" id="flt-ring" checked> ring</label>
+      <label class="filter"><input type="checkbox" id="flt-stripe" checked> stripe</label>
+      <label class="filter"><input type="checkbox" id="flt-both" checked> both</label>
+      <label class="filter"><input type="checkbox" id="flt-none" checked> none</label>
+      <span id="allUncheckedWarn">No categories selected – nothing shown.</span>
+    </div>
+    <div id="row3">
+      <span id="skipReport"></span>
     </div>
   </div>
-</div>
 
-<!-- ---------- Add/Edit Modal ---------- -->
-<div id="addModal" style="display:none">
-  <div id="addCard">
-    <div style="display:flex; align-items:center; justify-content:space-between;">
-      <h3 id="addTitle">Add Marker</h3>
-      <button id="addClose" title="Close">✕</button>
+  <div id="map"></div>
+
+  <!-- Help Modal (independent) -->
+  <div id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+    <div id="helpContent">
+      <button id="helpClose" aria-label="Close help">Close</button>
+      <h2 id="helpTitle">User Guide – Map Tool</h2>
+      <div id="helpList">
+        <p><strong>Uploading a CSV</strong><br>
+        Use “Choose File” or drag & drop. Required columns: <code>lat</code>, <code>lon</code>, <code>label</code>, <code>band_type</code>.
+        Band type accepts <code>ring</code>, <code>stripe</code>, <code>both</code>, <code>none</code> (abbreviations OK, case-insensitive).</p>
+        <p><strong>Marker colors</strong><br>
+        Blue = ring, Orange = stripe, Purple = both, Gray = none.</p>
+        <p><strong>Shading</strong><br>
+        Ring shades the 10° latitude band; Stripe shades the 10° longitude band; Both shades both. A band is shaded once even with multiple points.</p>
+        <p><strong>Overlapping points</strong><br>
+        Nearby points are clustered. Click a cluster to fan out (spiderfy) or zoom in to separate.</p>
+        <p><strong>Controls</strong><br>
+        <b>Clear markers</b> removes all markers and shading. <b>Download normalized CSV</b> exports a cleaned copy with normalized values and 10° bins. Use the checkboxes to show/hide categories.</p>
+        <p><strong>Troubleshooting</strong><br>
+        Re-uploading the same file is supported. If rows are skipped, reasons appear under the toolbar (e.g., out-of-range lat/lon).</p>
+      </div>
     </div>
-    <form id="addForm">
-      <input type="hidden" id="am-id" value="">
-      <div class="row">
-        <div><label>Latitude</label><input id="am-lat" type="text" required></div>
-        <div><label>Longitude</label><input id="am-lon" type="text" required></div>
-      </div>
-      <div class="row">
-        <div style="flex:1.2"><label>Label</label><input id="am-label" type="text" placeholder="Name/label"></div>
-        <div style="flex:.8"><label>Band type</label>
-          <select id="am-band">
-            <option value="both">both</option><option value="ring">ring</option>
-            <option value="stripe">stripe</option><option value="none">none</option>
-          </select>
-        </div>
-      </div>
-      <div class="row">
-        <div style="flex:.8"><label>Date (optional)</label><input id="am-date" type="text" placeholder="YYYY-MM-DD or any text"></div>
-        <div style="flex:1.2"><label>Comments (optional)</label><input id="am-comments" type="text" placeholder="Notes…"></div>
-      </div>
-      <div class="actions">
-        <button type="button" id="addCancel">Cancel</button>
-        <button type="submit" id="addSubmit">Save</button>
-      </div>
-    </form>
   </div>
-</div>
 
-<script>
-/* ==================== Map setup ==================== */
-
-// Keep the gridlines visible at all times
-const map = L.map('map', { center:[20,0], zoom:2, minZoom:2, worldCopyJump:true });
-
-// Base layer
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-  { maxZoom:19, attribution:'&copy; OpenStreetMap' }).addTo(map);
-
-// Z-index ordering: grid (350) < shading (365) < ghosts (480) < default markers/clusters (~400)
-map.createPane('gridPane');  map.getPane('gridPane').style.zIndex = 350;
-map.createPane('shadePane'); map.getPane('shadePane').style.zIndex = 365;
-map.createPane('ghostPane'); map.getPane('ghostPane').style.zIndex = 480;
-
-/* Grid lines & a few labels */
-const gridStyle = { pane:'gridPane', color:'#2b2b2b', weight:1, opacity:0.6, dashArray:'4,4' };
-for(let lon=-180; lon<=180; lon+=10) L.polyline([[-85,lon],[85,lon]], gridStyle).addTo(map);
-for(let lat=-80;  lat<=80;  lat+=10) L.polyline([[lat,-180],[lat,180]], gridStyle).addTo(map);
-const fmtDeg=d=>d>0?`${d}°`:d<0?`${Math.abs(d)}°`:'0°';
-for(let lon=-180; lon<=180; lon+=30)
-  L.marker([0,lon],{pane:'gridPane',interactive:false,icon:L.divIcon({className:'gridlabel',html:`${fmtDeg(lon)}E/W`,iconSize:[0,0]})}).addTo(map);
-for(let lat=-60; lat<=60; lat+=30)
-  L.marker([lat,0],{pane:'gridPane',interactive:false,icon:L.divIcon({className:'gridlabel',html:`${fmtDeg(lat)}N/S`,iconSize:[0,0]})}).addTo(map);
-
-/* Shading layers for rings/stripes */
-const ringLayer   = L.featureGroup({ pane:'shadePane' }).addTo(map);
-const stripeLayer = L.featureGroup({ pane:'shadePane' }).addTo(map);
-
-/* Cluster group with offset transparent count label */
-const cluster = L.markerClusterGroup({
-  zoomToBoundsOnClick:false,
-  spiderfyOnEveryZoom:false,
-  spiderfyOnMaxZoom:true,
-  showCoverageOnHover:false,
-  disableClusteringAtZoom:12,
-  maxClusterRadius:60,
-  iconCreateFunction:(c)=> L.divIcon({
-    className:'cluster-count-wrap',
-    html:`<div class="cluster-count">${c.getChildCount()}</div>`,
-    iconSize:[40,20], iconAnchor:[20,10]  // larger click area, still transparent
-  })
-}).addTo(map);
-cluster.on('clusterclick', e => e.layer.spiderfy());
-
-/* Ghost layer: tiny dots at true positions when clustered */
-const ghostLayer = L.layerGroup({ pane:'ghostPane' }).addTo(map);
-
-/* ==================== State ==================== */
-
-let pool = { ring:new Set(), stripe:new Set(), both:new Set(), none:new Set() };
-const initPools = () => (pool = { ring:new Set(), stripe:new Set(), both:new Set(), none:new Set() });
-
-const BAND_COLORS = {
-  ring:   localStorage.getItem('col_ring')   || '#2f7ed8',
-  stripe: localStorage.getItem('col_stripe') || '#f28f43',
-  both:   localStorage.getItem('col_both')   || '#8e44ad',
-  none:   '#7f8c8d'
-};
-const colorRing=document.getElementById('color-ring'),
-      colorStripe=document.getElementById('color-stripe'),
-      colorBoth=document.getElementById('color-both');
-colorRing.value=BAND_COLORS.ring; colorStripe.value=BAND_COLORS.stripe; colorBoth.value=BAND_COLORS.both;
-
-const counts = { ring:0, stripe:0, both:0, none:0, total:0 };
-const legendEl = document.getElementById('legend');
-function renderLegend(){
-  legendEl.innerHTML = ['ring','stripe','both','none'].map(k =>
-    `<span class="legend-item"><span class="swatch" style="background:${BAND_COLORS[k]}"></span>${k} (${counts[k]||0})</span>`
-  ).join('') + (counts.total ? `&nbsp;&nbsp;<span class="legend-item">total ${counts.total}</span>` : '');
-}
-renderLegend();
-
-const gRingSet = new Set(), gStripeSet = new Set();
-const ringColorByLow = new Map(), stripeColorByLow = new Map();
-
-let midCounter = 1;
-const markersById = new Map();  // id -> {mid, lat, lon, label, bandType, ... , marker}
-const markerToId = new Map();   // marker -> id
-let normalizedRows = [];        // export buffer
-
-/* ==================== UI refs ==================== */
-
-const statusEl = document.getElementById('status'),
-      csvInput = document.getElementById('csvInput'),
-      dropzone = document.getElementById('dropzone'),
-      clearBtn = document.getElementById('clearBtn'),
-      downloadBtn = document.getElementById('downloadBtn'),
-      exampleBtn = document.getElementById('exampleBtn'),
-      skipReportEl = document.getElementById('skipReport');
-
-const ringsBadge = document.getElementById('ringsBadge'),
-      stripesBadge = document.getElementById('stripesBadge');
-const TOTAL_RINGS=18, TOTAL_STRIPES=36;
-
-function updateCoverage(){
-  const r=gRingSet.size, s=gStripeSet.size;
-  const rPct=Math.round((r/TOTAL_RINGS)*100), sPct=Math.round((s/TOTAL_STRIPES)*100);
-  ringsBadge.textContent=`Rings: ${r}/${TOTAL_RINGS} (${rPct}%)${rPct===100?' — Completed':''}`;
-  stripesBadge.textContent=`Stripes: ${s}/${TOTAL_STRIPES} (${sPct}%)${sPct===100?' — Completed':''}`;
-  ringsBadge.classList.toggle('complete', rPct===100);
-  stripesBadge.classList.toggle('complete', sPct===100);
-}
-updateCoverage();
-
-/* Filters */
-const flt={ ring:document.getElementById('flt-ring'),
-            stripe:document.getElementById('flt-stripe'),
-            both:document.getElementById('flt-both'),
-            none:document.getElementById('flt-none') };
-Object.entries(flt).forEach(([type,el])=> el.addEventListener('change',()=>{
-  if(el.checked) pool[type].forEach(m=>cluster.addLayer(m));
-  else           pool[type].forEach(m=>cluster.removeLayer(m));
-  rebuildGhosts();
-}));
-
-/* Color pickers update markers, shading & ghosts */
-function onColorsChanged(){ renderLegend(); refreshMarkerIcons(); refreshShading(); rebuildGhosts(); }
-colorRing.addEventListener('change', ()=>{ BAND_COLORS.ring=colorRing.value; localStorage.setItem('col_ring',BAND_COLORS.ring); onColorsChanged(); });
-colorStripe.addEventListener('change', ()=>{ BAND_COLORS.stripe=colorStripe.value; localStorage.setItem('col_stripe',BAND_COLORS.stripe); onColorsChanged(); });
-colorBoth.addEventListener('change', ()=>{ BAND_COLORS.both=colorBoth.value; localStorage.setItem('col_both',BAND_COLORS.both); onColorsChanged(); });
-
-/* ==================== Clear ==================== */
-clearBtn.addEventListener('click', ()=>{
-  cluster.clearLayers(); ghostLayer.clearLayers(); initPools();
-  ringLayer.clearLayers(); stripeLayer.clearLayers();
-  gRingSet.clear(); gStripeSet.clear(); ringColorByLow.clear(); stripeColorByLow.clear();
-  counts.ring=counts.stripe=counts.both=counts.none=counts.total=0; renderLegend();
-  normalizedRows=[]; markersById.clear(); markerToId.clear(); midCounter=1;
-  setStatus('Markers and shading cleared.'); downloadBtn.disabled=true; csvInput.value=''; skipReportEl.textContent='';
-  updateCoverage();
-});
-
-/* ==================== Add/Edit via modal ==================== */
-
-// Right-click empty map → Add…
-let pendingAddLatLng=null;
-map.on('contextmenu', e=>{
-  pendingAddLatLng=e.latlng;
-  L.popup().setLatLng(e.latlng).setContent(
-    `<div><div style="font-weight:600;margin-bottom:4px">Here: ${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}</div>
-     <button id="startAddBtn">Add…</button></div>`
-  ).openOn(map);
-  setTimeout(()=>{ const btn=document.getElementById('startAddBtn'); if(btn){ btn.addEventListener('click',()=>{ openAddDialogForAdd(pendingAddLatLng); map.closePopup(); }); }},0);
-});
-
-// Right-click marker → Edit…
-function attachMarkerContextMenu(marker, mid){
-  marker.on('contextmenu', e=>{
-    const o=markersById.get(mid);
-    L.popup().setLatLng(e.latlng).setContent(
-      `<div><div style="font-weight:600;margin-bottom:4px">${esc(o.label || '(no label)')}</div>
-       <button id="startEditBtn">Edit…</button></div>`
-    ).openOn(map);
-    setTimeout(()=>{ const btn=document.getElementById('startEditBtn'); if(btn){ btn.addEventListener('click',()=>{ openAddDialogForEdit(mid); map.closePopup(); }); }},0);
-  });
-}
-
-function openAddDialogForAdd(latlng){
-  document.getElementById('addTitle').textContent='Add Marker';
-  document.getElementById('am-id').value='';
-  document.getElementById('am-lat').value=latlng.lat.toFixed(6);
-  document.getElementById('am-lon').value=latlng.lng.toFixed(6);
-  document.getElementById('am-label').value='';
-  document.getElementById('am-band').value='both';
-  document.getElementById('am-date').value='';
-  document.getElementById('am-comments').value='';
-  document.getElementById('addModal').style.display='block';
-  document.getElementById('am-label').focus();
-}
-function openAddDialogForEdit(mid){
-  const o=markersById.get(mid); if(!o) return;
-  document.getElementById('addTitle').textContent='Edit Marker';
-  document.getElementById('am-id').value=mid;
-  document.getElementById('am-lat').value=(+o.lat).toFixed(6);
-  document.getElementById('am-lon').value=(+o.lon).toFixed(6);
-  document.getElementById('am-label').value=o.label||'';
-  document.getElementById('am-band').value=o.bandType;
-  document.getElementById('am-date').value=o.date||'';
-  document.getElementById('am-comments').value=o.comments||'';
-  document.getElementById('addModal').style.display='block';
-  document.getElementById('am-label').focus();
-}
-(function wireAddModal(){
-  const modal=document.getElementById('addModal'), closeBtn=document.getElementById('addClose'), cancelBtn=document.getElementById('addCancel'), form=document.getElementById('addForm');
-  const close=()=> modal.style.display='none';
-  closeBtn.addEventListener('click',close); cancelBtn.addEventListener('click',close);
-  window.addEventListener('click',e=>{ if(e.target===modal) close(); });
-  form.addEventListener('submit', e=>{
-    e.preventDefault();
-    const idField=document.getElementById('am-id').value;
-    const lat=toNum(document.getElementById('am-lat').value);
-    const lon=toNum(document.getElementById('am-lon').value);
-    const label=(document.getElementById('am-label').value||'').trim();
-    const bandType=parseBandType((document.getElementById('am-band').value||'').trim());
-    const date=(document.getElementById('am-date').value||'').trim();
-    const comments=(document.getElementById('am-comments').value||'').trim();
-    if(!isFinite(lat)||!isFinite(lon)){ setStatus('Invalid lat/lon'); return; }
-    if(idField) updateExistingMarker(+idField,{lat,lon,label,bandType,date,comments});
-    else addManualPoint(lat,lon,label,bandType,date,comments);
-    close();
-  });
-})();
-
-/* ==================== Marker helpers ==================== */
-
-function makeMarker(lat, lon, color, labelText, popupHtml){
-  const icon = L.divIcon({
-    className:'',
-    html:`<svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="${color}" stroke="black" stroke-opacity=".25"/></svg>`,
-    iconSize:[16,16], iconAnchor:[8,8]
-  });
-  const m=L.marker([lat,lon],{icon, riseOnHover:true});
-  if(labelText) m.bindTooltip(String(labelText),{permanent:true, direction:'right', offset:[10,0], className:'gridlabel'});
-  if(popupHtml) m.bindPopup(popupHtml,{maxWidth:280});
-  return m;
-}
-
-function popupHtmlFor(o){
-  return `<div>
-    <div style="font-weight:700;margin-bottom:4px">${esc(o.label||'(no label)')}</div>
-    <div>Band: ${esc(o.bandType)}</div>
-    ${o.date?`<div>Date: ${esc(o.date)}</div>`:''}
-    ${o.comments?`<div>Notes: ${esc(o.comments)}</div>`:''}
-    <div style="margin-top:6px;font-size:11px;color:#666">Lat: ${(+o.lat).toFixed(5)}, Lon: ${(+o.lon).toFixed(5)}</div>
-  </div>`;
-}
-
-function addManualPoint(lat, lng, label, bandType, date, comments){
-  const lon=normLon(lng);
-  const ringLow=Math.floor(lat/10)*10, stripeLow=Math.floor(lon/10)*10, mid=midCounter++;
-  const o={ mid, lat:+lat, lon:+lon, label, bandType, date, comments, ringLow, stripeLow, marker:null };
-  const m=makeMarker(o.lat,o.lon,(BAND_COLORS[bandType]||BAND_COLORS.both),label,popupHtmlFor(o));
-  o.marker=m; markersById.set(mid,o); markerToId.set(m,mid); attachMarkerContextMenu(m,mid);
-  pool[bandType].add(m); if(flt[bandType].checked) cluster.addLayer(m);
-  normalizedRows.push({ id:mid, lat:+o.lat.toFixed(6), lon:+o.lon.toFixed(6), label, date, comments,
-    band_type_input:bandType, band_type_normalized:bandType, ring_low:ringLow, stripe_low:stripeLow });
-  refreshCountsShadingLegend(); downloadBtn.disabled=false; rebuildGhosts();
-  setStatus(`Added: ${label||'(no label)'} — ${bandType}`);
-}
-
-function updateExistingMarker(mid, patch){
-  const o=markersById.get(mid); if(!o) return; const prev=o.bandType;
-  o.lat=+patch.lat; o.lon=normLon(patch.lon); o.label=patch.label; o.bandType=patch.bandType; o.date=patch.date; o.comments=patch.comments;
-  o.ringLow=Math.floor(o.lat/10)*10; o.stripeLow=Math.floor(o.lon/10)*10;
-  if(prev!==o.bandType){ pool[prev].delete(o.marker); pool[o.bandType].add(o.marker); cluster.removeLayer(o.marker); if(flt[o.bandType].checked) cluster.addLayer(o.marker); }
-  o.marker.setLatLng([o.lat,o.lon]);
-  o.marker.setIcon(L.divIcon({className:'',html:`<svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="${BAND_COLORS[o.bandType]||BAND_COLORS.both}" stroke="black" stroke-opacity=".25"/></svg>`,iconSize:[16,16],iconAnchor:[8,8]}));
-  if(o.label) o.marker.bindTooltip(String(o.label),{permanent:true,direction:'right',offset:[10,0],className:'gridlabel'}); else o.marker.unbindTooltip();
-  o.marker.bindPopup(popupHtmlFor(o),{maxWidth:280});
-  const idx=normalizedRows.findIndex(r=>r.id===mid);
-  const row={ id:mid, lat:+(+o.lat).toFixed(6), lon:+(+o.lon).toFixed(6), label:o.label, date:o.date, comments:o.comments,
-              band_type_input:o.bandType, band_type_normalized:o.bandType, ring_low:o.ringLow, stripe_low:o.stripeLow };
-  if(idx>=0) normalizedRows[idx]=row; else normalizedRows.push(row);
-  refreshCountsShadingLegend(); rebuildGhosts(); setStatus(`Updated: ${o.label||'(no label)'} — ${o.bandType}`);
-}
-
-function refreshCountsShadingLegend(){ refreshCounts(); refreshShading(); renderLegend(); }
-
-/* Counts + legend + coverage */
-function refreshCounts(){
-  counts.ring=counts.stripe=counts.both=counts.none=counts.total=0;
-  for(const [,o] of markersById){ counts[o.bandType]=(counts[o.bandType]||0)+1; counts.total++; }
-  updateCoverage();
-}
-function refreshMarkerIcons(){
-  for(const [,o] of markersById){
-    o.marker.setIcon(L.divIcon({className:'',html:`<svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="${BAND_COLORS[o.bandType]||BAND_COLORS.both}" stroke="black" stroke-opacity=".25"/></svg>`,iconSize:[16,16],iconAnchor:[8,8]}));
-  }
-}
-function refreshShading(){
-  gRingSet.clear(); gStripeSet.clear(); ringColorByLow.clear(); stripeColorByLow.clear();
-  const prR={both:2, ring:1}, prS={both:2, stripe:1};
-  for(const [,o] of markersById){
-    if(o.bandType==='ring'||o.bandType==='both'){ gRingSet.add(o.ringLow); const cur=ringColorByLow.get(o.ringLow), k=o.bandType; if(!cur||(prR[k]||0)>=(prR[cur?.key]||0)) ringColorByLow.set(o.ringLow,{key:k,color:BAND_COLORS[k]}); }
-    if(o.bandType==='stripe'||o.bandType==='both'){ gStripeSet.add(o.stripeLow); const cur=stripeColorByLow.get(o.stripeLow), k=o.bandType; if(!cur||(prS[k]||0)>=(prS[cur?.key]||0)) stripeColorByLow.set(o.stripeLow,{key:k,color:BAND_COLORS[k]}); }
-  }
-  ringLayer.clearLayers(); stripeLayer.clearLayers();
-  for(const [low,info] of ringColorByLow){ const south=Math.max(-85,low), north=Math.min(85,low+10); if(north>south) L.rectangle([[south,-180],[north,180]],{pane:'shadePane',weight:0,color:info.color,fillColor:info.color,fillOpacity:0.18}).addTo(ringLayer); }
-  for(const [low,info] of stripeColorByLow){ const west=Math.max(-180,low), east=Math.min(180,low+10); if(east>west) L.rectangle([[-85,west],[85,east]],{pane:'shadePane',weight:0,color:info.color,fillColor:info.color,fillOpacity:0.18}).addTo(stripeLayer); }
-  updateCoverage();
-}
-
-/* ==================== CSV load / example ==================== */
-
-csvInput.addEventListener('click', ()=>{ csvInput.value=''; });
-csvInput.addEventListener('change', ()=> csvInput.files?.[0] && handleFile(csvInput.files[0]));
-
-['dragenter','dragover'].forEach(evt=> dropzone.addEventListener(evt, e=>{ e.preventDefault(); e.dataTransfer.dropEffect='copy'; dropzone.classList.add('drag'); }));
-['dragleave','drop'].forEach(evt=> dropzone.addEventListener(evt, e=>{ e.preventDefault(); dropzone.classList.remove('drag'); }));
-dropzone.addEventListener('drop', e=>{ const f=e.dataTransfer.files?.[0]; if(f) handleFile(f); });
-
-function handleFile(file){ setStatus(`Loading ${file.name}…`); parseCsvWithFallback(file); }
-
-function parseCsvWithFallback(fileOrText,isText=false,attempt=1){
-  let finished=false, useWorker=(attempt===1);
-  const cfg={
-    header:true, dynamicTyping:true, skipEmptyLines:'greedy',
-    transformHeader:h=>String(h??'').trim(),  // trims leading/trailing spaces in header names
-    complete:(res)=>{ if(finished) return; finished=true; processRows(res); },
-    error:(err)=>{ if(finished) return; finished=true; if(useWorker){ setStatus('Parsing fallback (no worker)…'); parseCsvWithFallback(fileOrText,isText,2); } else setError('CSV parse error: '+(err?.message||'Unknown')); },
-    worker:useWorker
-  };
-  const watchdog=setTimeout(()=>{ if(finished) return; finished=true; setStatus('Parsing fallback (no worker)…'); parseCsvWithFallback(fileOrText,isText,2); },3000);
-  const oc=cfg.complete, oe=cfg.error; cfg.complete=r=>{ clearTimeout(watchdog); oc(r); }; cfg.error=e=>{ clearTimeout(watchdog); oe(e); };
-  try{ Papa.parse(fileOrText,cfg); }catch(e){ clearTimeout(watchdog); if(useWorker) parseCsvWithFallback(fileOrText,isText,2); else setError('CSV parse error: '+e.message); }
-}
-
-const EXAMPLE_PATH='./Example_World_Wonders.csv';
-const EMBEDDED_SAMPLE=`lat,lon,label,band_type,date,comments
-29.9792,31.1342,Great Pyramid,both,2023-10-02,Amazing sunrise
-27.1751,78.0421,Taj Mahal,ring,2022-03-15,Marble is stunning
-41.8902,12.4922,Colosseum,stripe,,Ancient vibes
--22.9519,-43.2105,Christ the Redeemer,both,2021-07-12,Cloudy day
--13.1631,-72.5450,Machu Picchu,ring,2020-09-05,Hiked up early
-40.4319,116.5704,Great Wall,stripe,2019-05-21,Badaling section
--25.3444,131.0369,Uluru,ring,,Red rock glory`;
-exampleBtn.addEventListener('click', async ()=>{
-  try{
-    setStatus('Loading example CSV…');
-    const r=await fetch(EXAMPLE_PATH,{cache:'no-cache'});
-    if(!r.ok) throw new Error('not found');
-    const text=await r.text();
-    setStatus('Parsing example…');
-    parseCsvWithFallback(text,true);
-  }catch{
-    console.warn('Example fetch failed, using embedded sample');
-    parseCsvWithFallback(EMBEDDED_SAMPLE,true);
-  }
-});
-
-function processRows(results){
-  try{
-    const fields=(results.meta.fields||[]).map(s=>String(s||'').trim());
-    if(!results.data.length) return setError('No rows found in CSV.');
-    const H=mapHeadersFlexible(fields);
-    if(!H.lat||!H.lon) return setError('Missing latitude/longitude headers.');
-    setStatus(`Detected headers → lat: "${H.lat}", lon: "${H.lon}", label: "${H.label??'(none)'}", date: "${H.date??'(optional)'}", comments: "${H.comments??'(optional)'}", band: "${H.bandType??'(default both)'}"`);
-
-    // Reset state for a fresh dataset
-    cluster.clearLayers(); ghostLayer.clearLayers(); initPools();
-    ringLayer.clearLayers(); stripeLayer.clearLayers();
-    gRingSet.clear(); gStripeSet.clear(); ringColorByLow.clear(); stripeColorByLow.clear();
-    normalizedRows=[]; markersById.clear(); markerToId.clear(); midCounter=1;
-    counts.ring=counts.stripe=counts.both=counts.none=counts.total=0; renderLegend(); updateCoverage(); skipReportEl.textContent='';
-
-    let skipped=0, skippedRows=[];
-
-    results.data.forEach((row, i)=>{
-      const rowNo=i+2, lat=toNum(row[H.lat]), lonRaw=toNum(row[H.lon]);
-      if(!isFinite(lat)||!isFinite(lonRaw)){ skipped++; skippedRows.push(`row ${rowNo}: non-numeric lat/lon`); return; }
-      if(Math.abs(lat)>90){ skipped++; skippedRows.push(`row ${rowNo}: latitude ${lat} out of range`); return; }
-      if(Math.abs(lonRaw)>180){ skipped++; skippedRows.push(`row ${rowNo}: longitude ${lonRaw} out of range`); return; }
-      const lon=normLon(lonRaw);
-      const label=safeStr(H.label?row[H.label]:''), date=safeStr(H.date?row[H.date]:''), comments=safeStr(H.comments?row[H.comments]:'');
-      const rawBand=H.bandType?safeStr(row[H.bandType]):''; const bandType=parseBandType(rawBand);
-      const ringLow=Math.floor(lat/10)*10, stripeLow=Math.floor(lon/10)*10, mid=midCounter++;
-      const o={ mid, lat:+lat, lon:+lon, label, bandType, date, comments, ringLow, stripeLow, marker:null };
-      const m=makeMarker(o.lat,o.lon,(BAND_COLORS[bandType]||BAND_COLORS.both),label,popupHtmlFor(o));
-      o.marker=m; markersById.set(mid,o); markerToId.set(m,mid); attachMarkerContextMenu(m,mid);
-      pool[bandType].add(m); if(flt[bandType].checked) cluster.addLayer(m);
-      normalizedRows.push({ id:mid, lat:+o.lat.toFixed(6), lon:+o.lon.toFixed(6), label, date, comments,
-        band_type_input:rawBand, band_type_normalized:bandType, ring_low:ringLow, stripe_low:stripeLow });
-    });
-
-    if(markersById.size===0) return setError('Parsed the CSV, but didn’t find any valid rows.');
-
-    refreshCountsShadingLegend();
-    const b=cluster.getBounds(); if(b.isValid()) map.fitBounds(b,{padding:[30,30]});
-    setStatus(`${markersById.size.toLocaleString()} point(s) loaded.`+(skipped?` Skipped ${skipped}.`:'')); skipReportEl.textContent=skipped?('Skipped → '+skippedRows.join(' | ')):'';
-    downloadBtn.disabled=false; rebuildGhosts();
-  }catch(e){ setError('Error processing CSV: '+e.message); }
-}
-
-/* ==================== Export ==================== */
-downloadBtn.addEventListener('click', ()=>{
-  if(!normalizedRows.length) return;
-  const csv=Papa.unparse(normalizedRows,{columns:['id','lat','lon','label','date','comments','band_type_input','band_type_normalized','ring_low','stripe_low']});
-  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
-  const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='normalized_points.csv';
-  document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },0);
-});
-
-/* ==================== Ghost dots (always visible over label) ==================== */
-function rebuildGhosts(){
-  ghostLayer.clearLayers();
-  cluster.getLayers().forEach(l=>{
-    if(l && typeof l.getChildCount==='function' && l.getChildCount()>1){
-      l.getAllChildMarkers().forEach(cm=>{
-        const mid=markerToId.get(cm), o=mid?markersById.get(mid):null;
-        const fill=o?(BAND_COLORS[o.bandType]||BAND_COLORS.both):'#666';
-        const g=L.circleMarker(cm.getLatLng(),{pane:'ghostPane', radius:3.2, weight:1, color:'#000', opacity:.6, fillColor:fill, fillOpacity:1});
-        g.on('click',()=>{ const p=cluster.getVisibleParent(cm); if(p&&p.spiderfy) p.spiderfy(); });
-        ghostLayer.addLayer(g);
-      });
-    }
-  });
-}
-cluster.on('animationend', rebuildGhosts);
-cluster.on('spiderfied', rebuildGhosts);
-cluster.on('unspiderfied', rebuildGhosts);
-map.on('zoomend moveend', rebuildGhosts);
-
-/* ==================== Help modal ==================== */
-const helpBtn=document.getElementById('helpBtn'), helpModal=document.getElementById('helpModal'), helpClose=document.getElementById('helpClose');
-helpBtn.addEventListener('click',()=>{ helpModal.style.display='block'; });
-helpClose.addEventListener('click',()=>{ helpModal.style.display='none'; });
-window.addEventListener('click',e=>{ if(e.target===helpModal) helpModal.style.display='none'; });
-
-/* ==================== Utilities ==================== */
-
-function mapHeadersFlexible(fields){
-  const norm=s=>String(s||'').toLowerCase().replace(/[\s._\-\/\\]+/g,'');
-  const by=new Map(fields.map(f=>[norm(f),f]));
-  const pick=alts=>{ for(const a of alts) if(by.has(a)) return by.get(a); };
-  const lat=pick(['lat','latitude','y']); const lon=pick(['lon','lng','long','longitude','x']);
-  const label=pick(['label','name','title','text','pointlabel']);
-  const date=pick(['date','visited','timestamp','time','dt']);
-  const comments=pick(['comments','comment','notes','note','remarks','description','desc']);
-  let bandType=pick(['bandtype','band','ringorstripe','ringstripe','ros','association','assoc','type','rs','markertype','band_type']);
-  if(!bandType&&fields.length>=4) bandType=fields[fields.length-1]; // heuristic
-  return { lat, lon, label, date, comments, bandType };
-}
-
-function toNum(v){
-  if(typeof v==='number') return v;
-  if(typeof v!=='string') return NaN;
-  // Normalize unicode minus / spaces; allow N/S/E/W suffix
-  let s=v.replace(/[\u2212\u2010-\u2015]/g,'-').replace(/[\u00A0\u1680\u2000-\u200B\u202F\u205F\u2060\u3000\uFEFF]/g,' ').trim();
-  const m=s.match(/^([+-]?\d+(?:\.\d+)?)(?:\s*([NSEWnsew]))?$/);
-  if(!m) return parseFloat(s);
-  let n=parseFloat(m[1]); const hemi=(m[2]||'').toUpperCase();
-  if(hemi==='S'||hemi==='W') n=-Math.abs(n);
-  if(hemi==='N'||hemi==='E') n=Math.abs(n);
-  return n;
-}
-const safeStr=v=>(v==null?'':String(v));
-const normLon=lon=>{ let L=+lon; if(!isFinite(L)) return lon; L=((L+180)%360+360)%360-180; if(L===180) L=-180; return L; };
-const esc=s=>String(s).replace(/[&<>"']/g,c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-function parseBandType(raw){
-  const s=String(raw||'').trim().toLowerCase().replace(/\s+/g,'');
-  if(!s) return 'both'; if(s==='rs'||s==='sr') return 'both';
-  if(s.startsWith('n')) return 'none'; if(s.startsWith('b')) return 'both';
-  if(s.startsWith('s')) return 'stripe'; if(s.startsWith('r')) return 'ring';
-  if(s.includes('stripe')) return 'stripe'; if(s.includes('ring')) return 'ring';
-  const hasR=s.includes('r'), hasS=s.includes('s'); if(hasR&&hasS) return 'both'; if(hasR) return 'ring'; if(hasS) return 'stripe'; return 'both';
-}
-function setStatus(msg){ statusEl.textContent=msg; statusEl.className='status'; }
-function setError(msg){ statusEl.textContent=msg; statusEl.className='status error'; }
-</script>
+  <!-- Your main logic -->
+  <script src="main.js"></script>
 </body>
 </html>
