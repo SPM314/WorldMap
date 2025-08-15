@@ -1,5 +1,28 @@
 // Version 8 with Example button & map drag/drop
 
+// Embedded sample CSV data (20 rows)
+const EMBEDDED_SAMPLE_CSV = `lat,lon,label,band_type
+29.9792,31.1344,Great Pyramid of Giza,both
+41.8902,12.4922,Colosseum,ring
+27.1751,78.0421,Taj Mahal,stripe
+-22.9519,-43.2105,Christ the Redeemer,none
+-13.1631,-72.5450,Machu Picchu,both
+40.7484,-73.9857,Statue of Liberty,ring
+48.8584,2.2945,Eiffel Tower,stripe
+51.5014,-0.1419,Big Ben,none
+55.7520,37.6175,Red Square,both
+35.6762,139.6503,Tokyo Tower,ring
+-33.8568,151.2153,Sydney Opera House,stripe
+41.4036,2.1744,Sagrada Familia,none
+25.3444,131.0369,Itsukushima Shrine,both
+30.3285,35.4444,Petra,ring
+20.6843,-88.5678,Chichen Itza,stripe
+-1.2921,36.8219,Mount Kenya,none
+43.7696,11.2558,Leaning Tower of Pisa,both
+52.5200,13.4050,Brandenburg Gate,ring
+37.9755,23.7348,Acropolis of Athens,stripe
+61.2181,-149.9003,Anchorage,none`;
+
 document.addEventListener('DOMContentLoaded', function() {
   // --- Leaflet Map Initialization and grid ---
   if (typeof L === 'undefined') { alert('Leaflet not loaded'); return; }
@@ -203,21 +226,16 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 
-  // --- Example Button Logic: load World Wonders.csv from repo ---
+  // --- Example Button Logic: load embedded sample data ---
   if (exampleBtn) {
-    exampleBtn.addEventListener("click", function() {
-      if (csvInput) csvInput.value = ""; // clear any selection
-      fetch('World%20Wonders.csv').then(resp => {
-        if (!resp.ok) throw new Error('Failed to load example CSV');
-        return resp.text();
-      }).then(text => {
-        setStatus("Loaded example data.");
-        Papa.parse(text, {
-          header: true,
-          skipEmptyLines: true,
-          complete: results => processCSVRows(results.data, results.meta.fields)
-        });
-      }).catch(err => setError(err.message));
+    exampleBtn.addEventListener('click', () => {
+      if (csvInput) csvInput.value = '';
+      setStatus('Loaded example data.');
+      Papa.parse(EMBEDDED_SAMPLE_CSV, {
+        header: true,
+        skipEmptyLines: true,
+        complete: r => processCSVRows(r.data, r.meta.fields)
+      });
     });
   }
 
@@ -255,6 +273,10 @@ document.addEventListener('DOMContentLoaded', function() {
         let bRaw = bandRaw.trim().toLowerCase();
         if (['ring', 'stripe', 'both', 'none'].includes(bRaw)) band = bRaw;
       }
+
+      // Define dateVal and commentVal using the resolved keys
+      const dateVal = dateKey ? (r[dateKey] || '') : '';
+      const commentVal = commentKey ? (r[commentKey] || '') : '';
 
       if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
         skipRows.push({ row: i + 2, reason: 'Invalid or out-of-range lat/lon' });
@@ -552,5 +574,274 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   map.on('zoomend moveend', updateLabelOverlay);
+
+  // --- Right-click Context Menu UX ---
+  const contextMenu = document.getElementById('contextMenu');
+  const addMarkerBtn = document.getElementById('addMarkerBtn');
+  const editMarkerBtn = document.getElementById('editMarkerBtn');
+  const markerDialog = document.getElementById('markerDialog');
+  const markerDialogTitle = document.getElementById('markerDialogTitle');
+  const markerDialogClose = document.getElementById('markerDialogClose');
+  const markerDialogCancel = document.getElementById('markerDialogCancel');
+  const markerForm = document.getElementById('markerForm');
+  const markerLat = document.getElementById('markerLat');
+  const markerLon = document.getElementById('markerLon');
+  const markerLabel = document.getElementById('markerLabel');
+  const markerBandType = document.getElementById('markerBandType');
+  const markerDate = document.getElementById('markerDate');
+  const markerComment = document.getElementById('markerComment');
+
+  let contextMenuMode = 'map'; // 'map' or 'marker'
+  let clickedLatLng = null;
+  let selectedMarkerData = null;
+
+  // Right-click on map
+  map.on('contextmenu', function(e) {
+    contextMenuMode = 'map';
+    clickedLatLng = e.latlng;
+    selectedMarkerData = null;
+    
+    if (addMarkerBtn) addMarkerBtn.style.display = 'block';
+    if (editMarkerBtn) editMarkerBtn.style.display = 'none';
+    
+    showContextMenu(e.originalEvent.clientX, e.originalEvent.clientY);
+  });
+
+  function attachMarkerContextMenu(marker, rowRef) {
+    marker.on('contextmenu', function(e) {
+      L.DomEvent.stopPropagation(e);
+      contextMenuMode = 'marker';
+      clickedLatLng = null;
+      selectedMarkerData = rowRef;
+      
+      if (addMarkerBtn) addMarkerBtn.style.display = 'none';
+      if (editMarkerBtn) editMarkerBtn.style.display = 'block';
+      
+      showContextMenu(e.originalEvent.clientX, e.originalEvent.clientY);
+    });
+  }
+
+  // Wrap addMarkersAndShading to attach context menus
+  const _origAddMarkersAndShading = addMarkersAndShading;
+  addMarkersAndShading = function() {
+    // Attach context menus to all markers before layering
+    for (const d of markersData) {
+      attachMarkerContextMenu(d.marker, d);
+    }
+    _origAddMarkersAndShading();
+  };
+
+  function showContextMenu(x, y) {
+    if (!contextMenu) return;
+    contextMenu.style.display = 'block';
+    contextMenu.style.left = x + 'px';
+    contextMenu.style.top = y + 'px';
+  }
+
+  function hideContextMenu() {
+    if (contextMenu) contextMenu.style.display = 'none';
+  }
+
+  // Context menu button handlers
+  if (addMarkerBtn) {
+    addMarkerBtn.addEventListener('click', function() {
+      hideContextMenu();
+      openAddDialog(clickedLatLng);
+    });
+  }
+
+  if (editMarkerBtn) {
+    editMarkerBtn.addEventListener('click', function() {
+      hideContextMenu();
+      openEditDialog(selectedMarkerData);
+    });
+  }
+
+  function openAddDialog(latlng) {
+    if (!markerDialog || !latlng) return;
+    
+    if (markerDialogTitle) markerDialogTitle.textContent = 'Add Marker';
+    if (markerLat) markerLat.value = latlng.lat.toFixed(6);
+    if (markerLon) markerLon.value = latlng.lng.toFixed(6);
+    if (markerLabel) markerLabel.value = '';
+    if (markerBandType) markerBandType.value = 'both';
+    if (markerDate) markerDate.value = '';
+    if (markerComment) markerComment.value = '';
+    
+    markerDialog.classList.add('active');
+  }
+
+  function openEditDialog(markerData) {
+    if (!markerDialog || !markerData) return;
+    
+    if (markerDialogTitle) markerDialogTitle.textContent = 'Edit Marker';
+    if (markerLat) markerLat.value = markerData.lat.toFixed(6);
+    if (markerLon) markerLon.value = markerData.lon.toFixed(6);
+    if (markerLabel) markerLabel.value = markerData.label || '';
+    if (markerBandType) markerBandType.value = markerData.band_type || 'both';
+    if (markerDate) markerDate.value = markerData.date || '';
+    if (markerComment) markerComment.value = markerData.comment || '';
+    
+    markerDialog.classList.add('active');
+  }
+
+  // Dialog close handlers
+  if (markerDialogClose) {
+    markerDialogClose.addEventListener('click', function() {
+      markerDialog.classList.remove('active');
+    });
+  }
+
+  if (markerDialogCancel) {
+    markerDialogCancel.addEventListener('click', function() {
+      markerDialog.classList.remove('active');
+    });
+  }
+
+  // Form submit handler
+  if (markerForm) {
+    markerForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      
+      const lat = parseFloat(markerLat.value);
+      const lon = parseFloat(markerLon.value);
+      const label = markerLabel.value.trim();
+      const bandType = markerBandType.value;
+      const date = markerDate.value.trim();
+      const comment = markerComment.value.trim();
+      
+      // Validate ranges
+      if (isNaN(lat) || lat < -90 || lat > 90) {
+        alert('Latitude must be between -90 and 90');
+        return;
+      }
+      if (isNaN(lon) || lon < -180 || lon > 180) {
+        alert('Longitude must be between -180 and 180');
+        return;
+      }
+      if (!label) {
+        alert('Label is required');
+        return;
+      }
+      
+      const lonNorm = normLon(lon);
+      
+      if (contextMenuMode === 'edit' || selectedMarkerData) {
+        // Edit existing marker
+        const markerData = selectedMarkerData;
+        markerData.lat = lat;
+        markerData.lon = lonNorm;
+        markerData.label = label;
+        markerData.band_type = bandType;
+        markerData.date = date;
+        markerData.comment = comment;
+        
+        // Update marker position and icon
+        markerData.marker.setLatLng([lat, lonNorm]);
+        markerData.marker.setIcon(L.divIcon({
+          className: '',
+          html: `<svg width="24" height="24" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="8" fill="${BAND_COLORS[bandType] || '#888'}" stroke="#333" stroke-width="1.5"/>
+          </svg>`,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12]
+        }));
+        markerData.marker.options.title = label;
+        
+        // Update popup
+        updateMarkerPopup(markerData);
+        
+      } else {
+        // Add new marker
+        const marker = makeMarker(lat, lonNorm, bandType, label);
+        
+        const latBin = Math.floor((lat + 90) / 10) * 10 - 90;
+        const lonBin = Math.floor((lonNorm + 180) / 10) * 10 - 180;
+        
+        const newMarkerData = {
+          marker,
+          band_type: bandType,
+          lat,
+          lon: lonNorm,
+          label,
+          date,
+          comment,
+          allFields: {
+            lat,
+            lon: lonNorm,
+            label,
+            band_type: bandType,
+            date,
+            comment,
+            lat_bin: latBin,
+            lon_bin: lonBin
+          }
+        };
+        
+        updateMarkerPopup(newMarkerData);
+        attachMarkerContextMenu(marker, newMarkerData);
+        markersData.push(newMarkerData);
+      }
+      
+      markerDialog.classList.remove('active');
+      refreshAfterDataChange();
+    });
+  }
+
+  function updateMarkerPopup(markerData) {
+    const rowsHtml = Object.keys(markerData.allFields).map(k => {
+      return `<tr><th style="text-align:left; padding-right:8px; vertical-align:top;">${escapeHTML(k)}</th>` +
+             `<td style="white-space:pre-wrap; max-width:260px;">${escapeHTML(markerData.allFields[k])}</td></tr>`;
+    }).join('');
+    const popupHtml = `<div style="font-size:13px; line-height:1.35;">
+      <table>${rowsHtml}</table>
+    </div>`;
+    markerData.marker.bindPopup(popupHtml, { maxWidth: 320, autoPan: true });
+  }
+
+  function refreshAfterDataChange() {
+    // Recompute legend counts
+    legendCounts = { ring: 0, stripe: 0, both: 0, none: 0 };
+    for (const data of markersData) {
+      legendCounts[data.band_type] = (legendCounts[data.band_type] || 0) + 1;
+    }
+    
+    // Rebuild normalized CSV with current markersData
+    const csvRows = markersData.map(data => {
+      const latBin = Math.floor((data.lat + 90) / 10) * 10 - 90;
+      const lonBin = Math.floor((data.lon + 180) / 10) * 10 - 180;
+      return {
+        lat: data.lat,
+        lon: data.lon,
+        label: data.label,
+        band_type: data.band_type,
+        date: data.date || '',
+        comment: data.comment || '',
+        lat_bin: latBin,
+        lon_bin: lonBin
+      };
+    });
+    
+    normalizedCSV = 'lat,lon,label,band_type,lat_bin,lon_bin\\n' +
+      csvRows.map(r => [r.lat, r.lon, `"${(r.label + '').replace(/"/g, '""')}"`, r.band_type, r.lat_bin, r.lon_bin].join(',')).join('\\n');
+    
+    // Clear skip report since we're dealing with manual data
+    if (skipReport) skipReport.textContent = '';
+    
+    // Refresh overlays
+    addMarkersAndShading();
+  }
+
+  // Hide context menu on document click, ESC, and map movestart
+  document.addEventListener('click', hideContextMenu);
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      hideContextMenu();
+      if (markerDialog && markerDialog.classList.contains('active')) {
+        markerDialog.classList.remove('active');
+      }
+    }
+  });
+  map.on('movestart', hideContextMenu);
 
 });

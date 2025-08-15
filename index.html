@@ -32,6 +32,57 @@
     <div id="map"></div>
   </div>
 
+  <!-- Context Menu -->
+  <div id="contextMenu" class="context-menu" style="display:none;">
+    <div id="contextMenuContent">
+      <button id="addMarkerBtn" type="button">Add marker here...</button>
+      <button id="editMarkerBtn" type="button">Edit marker...</button>
+    </div>
+  </div>
+
+  <!-- Add/Edit Marker Dialog -->
+  <div id="markerDialog" class="modal" style="display:none;">
+    <div class="modal-content">
+      <button id="markerDialogClose" class="modal-close">&times;</button>
+      <h2 id="markerDialogTitle">Add Marker</h2>
+      <form id="markerForm">
+        <div>
+          <label for="markerLat">Latitude:</label>
+          <input type="number" id="markerLat" step="any" min="-90" max="90" required>
+        </div>
+        <div>
+          <label for="markerLon">Longitude:</label>
+          <input type="number" id="markerLon" step="any" min="-180" max="180" required>
+        </div>
+        <div>
+          <label for="markerLabel">Label:</label>
+          <input type="text" id="markerLabel" required>
+        </div>
+        <div>
+          <label for="markerBandType">Band Type:</label>
+          <select id="markerBandType" required>
+            <option value="ring">Ring</option>
+            <option value="stripe">Stripe</option>
+            <option value="both">Both</option>
+            <option value="none">None</option>
+          </select>
+        </div>
+        <div>
+          <label for="markerDate">Date (optional):</label>
+          <input type="text" id="markerDate">
+        </div>
+        <div>
+          <label for="markerComment">Comment (optional):</label>
+          <textarea id="markerComment" rows="3"></textarea>
+        </div>
+        <div>
+          <button type="submit">Save</button>
+          <button type="button" id="markerDialogCancel">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Modal for Help/User Guide -->
   <div id="helpModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="helpTitle" style="display:none;">
     <div id="helpContent" class="modal-content" tabindex="-1">
