@@ -1,58 +1,68 @@
-// Wait for DOMContentLoaded to ensure #map exists
+// Version 8 with Example button & map drag/drop
+
 document.addEventListener('DOMContentLoaded', function() {
-  // Check if Leaflet is loaded
-  if (typeof L === 'undefined') {
-    console.error('Leaflet library not loaded. Ensure leaflet.js is included before main.js');
-    return;
-  }
-
-  // Check if map container exists
+  // --- Leaflet Map Initialization and grid ---
+  if (typeof L === 'undefined') { alert('Leaflet not loaded'); return; }
   const mapDiv = document.getElementById('map');
-  if (!mapDiv) {
-    console.error('Map container with id="map" not found in HTML.');
-    return;
-  }
-  // Ensure map container has height
-  if (!mapDiv.style.height || mapDiv.style.height === '0px' || mapDiv.offsetHeight === 0) {
-    mapDiv.style.height = '70vh'; // Default height if not set
-    console.warn('Map container had no height; defaulting to 70vh.');
-  }
+  if (!mapDiv) { alert('Map container missing'); return; }
+  if (!mapDiv.style.height || mapDiv.offsetHeight === 0)
+    mapDiv.style.height = '70vh';
 
-  // --- Map Initialization ---
   const map = L.map('map', { center: [20, 0], zoom: 2, minZoom: 2, worldCopyJump: true });
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
     { maxZoom: 19, attribution:'&copy; OpenStreetMap' }).addTo(map);
 
-  // Panes for layers
   map.createPane('gridPane');  map.getPane('gridPane').style.zIndex = 350;
   map.createPane('shadePane'); map.getPane('shadePane').style.zIndex = 365;
-  map.createPane('clusterPane'); map.getPane('clusterPane').style.zIndex = 450;
+  map.createPane('labelPane'); map.getPane('labelPane').style.zIndex = 460;
+  map.createPane('leaderLinePane'); map.getPane('leaderLinePane').style.zIndex = 459;
 
-  // --- 10° Grid Rendering ---
   const gridStyle = { pane: 'gridPane', color: '#2b2b2b', weight: 1, opacity: 0.6, dashArray: '4,4' };
   for (let lon = -180; lon <= 180; lon += 10) L.polyline([[-85, lon], [85, lon]], gridStyle).addTo(map);
   for (let lat = -80; lat <= 80; lat += 10) L.polyline([[lat, -180], [lat, 180]], gridStyle).addTo(map);
 
-  // --- Constants for Bands ---
+  // --- Constants ---
   const BAND_COLORS = { ring: '#1976d2', stripe: '#f57c00', both: '#8e24aa', none: '#888' };
+  const RING_BAND_COUNT = 18, STRIPE_BAND_COUNT = 36;
 
-  // --- UI ELEMENTS ---
-  const legendEl = document.getElementById('legend');
+  // --- UI Elements ---
   const statusEl = document.getElementById('status');
   const skipReport = document.getElementById('skipReport');
   const csvInput = document.getElementById('csvInput');
   const clearBtn = document.getElementById('clearBtn');
   const downloadBtn = document.getElementById('downloadBtn');
-  const dropzone = document.getElementById('dropzone');
+  const helpBtn = document.getElementById('helpBtn');
+  const helpModal = document.getElementById('helpModal');
+  const helpClose = document.getElementById('helpClose');
+  const exampleBtn = document.getElementById('exampleBtn');
+  const shadedInfo = document.getElementById('shaded-info');
 
-  // --- Filter Checkboxes ---
+  // Filter elements
   const checkboxes = [
     document.getElementById('flt-ring'),
     document.getElementById('flt-stripe'),
     document.getElementById('flt-both'),
     document.getElementById('flt-none')
   ];
+  const lblRing = document.getElementById('lbl-ring');
+  const lblStripe = document.getElementById('lbl-stripe');
+  const lblBoth = document.getElementById('lbl-both');
+  const lblNone = document.getElementById('lbl-none');
   const allUncheckedWarn = document.getElementById('allUncheckedWarn');
+
+  // --- Help Modal Logic ---
+  if (helpBtn && helpModal && helpClose) {
+    helpBtn.addEventListener('click', () => { helpModal.classList.add('active'); });
+    helpClose.addEventListener('click', () => { helpModal.classList.remove('active'); });
+    helpModal.addEventListener('click', (e) => { if (e.target === helpModal) helpModal.classList.remove('active'); });
+  }
+
+  // --- Data Storage ---
+  let markerGroup = null, shadeGroup = null, labelOverlayGroup = null, leaderLineGroup = null;
+  let markersData = [], normalizedCSV = '';
+  let legendCounts = { ring: 0, stripe: 0, both: 0, none: 0 };
+  let shadedLatBands = new Set(), shadedLonBands = new Set();
+
   function updateCheckboxWarning() {
     const anyChecked = checkboxes.some(cb => cb && cb.checked);
     if (allUncheckedWarn) allUncheckedWarn.style.display = anyChecked ? 'none' : 'inline';
@@ -60,32 +70,45 @@ document.addEventListener('DOMContentLoaded', function() {
   checkboxes.forEach(cb => cb && cb.addEventListener('change', updateCheckboxWarning));
   updateCheckboxWarning();
 
-  // --- Marker and Shading Groups ---
-  let markerGroup = null;
-  let clusterLabelGroup = null; // Overlay group for cluster labels
-  let shadeGroup = null;
-  let markersData = [];
-  let normalizedCSV = '';
-  let legendCounts = { ring: 0, stripe: 0, both: 0, none: 0 };
+  function updateBandCountsInFilters() {
+    if (lblRing) lblRing.textContent = `Ring (${legendCounts.ring || 0})`;
+    if (lblStripe) lblStripe.textContent = `Stripe (${legendCounts.stripe || 0})`;
+    if (lblBoth) lblBoth.textContent = `Both (${legendCounts.both || 0})`;
+    if (lblNone) lblNone.textContent = `None (${legendCounts.none || 0})`;
+  }
+  function updateShadedInfo() {
+    const ringsVisited = shadedLatBands.size;
+    const stripesVisited = shadedLonBands.size;
+    const ringPct = ((ringsVisited / RING_BAND_COUNT) * 100).toFixed(1);
+    const stripePct = ((stripesVisited / STRIPE_BAND_COUNT) * 100).toFixed(1);
+    if (shadedInfo) {
+      shadedInfo.innerHTML =
+        `Rings: <b>${ringsVisited}</b>/${RING_BAND_COUNT} (${ringPct}%)<br>` +
+        `Stripes: <b>${stripesVisited}</b>/${STRIPE_BAND_COUNT} (${stripePct}%)`;
+    }
+  }
 
-  // --- UTILITIES: Band Type Normalization ---
+  // --- Band Type Normalization ---
   function normBandType(s) {
     if (!s) return 'both';
+    s = String(s).trim().toLowerCase();
+    if (s === 'ring') return 'ring';
+    if (s === 'stripe') return 'stripe';
+    if (s === 'both') return 'both';
+    if (s === 'none') return 'none';
     if (s === 'rs' || s === 'sr') return 'both';
     if (s.startsWith('n')) return 'none';
     if (s.startsWith('b')) return 'both';
     if (s.startsWith('s')) return 'stripe';
     if (s.startsWith('r')) return 'ring';
     if (s.includes('stripe')) return 'stripe';
-    if (s.includes('ring'))   return 'ring';
+    if (s.includes('ring')) return 'ring';
     const hasR = s.includes('r'), hasS = s.includes('s');
     if (hasR && hasS) return 'both';
     if (hasR) return 'ring';
     if (hasS) return 'stripe';
     return 'both';
   }
-
-  // --- UTILITIES: Normalize Longitude (-180 to <180) ---
   function normLon(lon) {
     let L = +lon;
     while (L < -180) L += 360;
@@ -93,20 +116,11 @@ document.addEventListener('DOMContentLoaded', function() {
     return L;
   }
 
-  // --- SET STATUS/ERROR ---
+  // --- Status/Errors ---
   function setStatus(msg) { if (statusEl) { statusEl.textContent = msg; statusEl.className = 'status'; } }
   function setError(msg) { if (statusEl) { statusEl.textContent = msg; statusEl.className = 'status error'; } }
 
-  // --- LEGEND RENDERING ---
-  function renderLegend() {
-    if (!legendEl) return;
-    legendEl.innerHTML = '';
-    for (const t of ['ring', 'stripe', 'both', 'none']) {
-      legendEl.innerHTML += `<span class="legend-item"><span class="swatch" style="background:${BAND_COLORS[t]}"></span>${t} (${legendCounts[t] || 0})</span>`;
-    }
-  }
-
-  // --- CHECKBOX FILTERING ---
+  // --- Filtering, clearing, and CSV download ---
   function filterMarkers() {
     if (!markerGroup) return;
     const showTypes = [];
@@ -118,26 +132,26 @@ document.addEventListener('DOMContentLoaded', function() {
     for (const m of markersData) {
       if (showTypes.includes(m.band_type)) markerGroup.addLayer(m.marker);
     }
-    updateClusterLabels();
+    updateLabelOverlay();
     updateCheckboxWarning();
   }
   checkboxes.forEach(cb => cb && cb.addEventListener('change', filterMarkers));
-
-  // --- CLEAR MARKERS AND SHADING ---
   function clearAll() {
     if (markerGroup) markerGroup.clearLayers();
-    if (clusterLabelGroup) clusterLabelGroup.clearLayers();
     if (shadeGroup) shadeGroup.clearLayers();
+    if (labelOverlayGroup) labelOverlayGroup.clearLayers();
+    if (leaderLineGroup) leaderLineGroup.clearLayers();
     if (skipReport) skipReport.textContent = '';
     legendCounts = { ring: 0, stripe: 0, both: 0, none: 0 };
-    renderLegend();
+    shadedLatBands = new Set();
+    shadedLonBands = new Set();
+    updateBandCountsInFilters();
+    updateShadedInfo();
     if (downloadBtn) downloadBtn.disabled = true;
     normalizedCSV = '';
     markersData = [];
   }
   if (clearBtn) clearBtn.addEventListener('click', clearAll);
-
-  // --- DOWNLOAD NORMALIZED CSV ---
   if (downloadBtn) downloadBtn.addEventListener('click', () => {
     if (!normalizedCSV) return;
     const blob = new Blob([normalizedCSV], { type: 'text/csv' });
@@ -148,7 +162,7 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
   });
 
-  // --- CSV UPLOAD & PARSE ---
+  // --- CSV load ---
   if (csvInput) csvInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (file && !file.name.endsWith('.csv') && file.type !== 'text/csv') {
@@ -158,11 +172,17 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     if (file) handleCSVFile(file);
   });
-
-  if (dropzone) dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
-  if (dropzone) dropzone.addEventListener('dragleave', e => { e.preventDefault(); dropzone.classList.remove('drag'); });
-  if (dropzone) dropzone.addEventListener('drop', e => {
-    e.preventDefault(); dropzone.classList.remove('drag');
+  mapDiv.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    mapDiv.classList.add('drag');
+  });
+  mapDiv.addEventListener('dragleave', function (e) {
+    e.preventDefault();
+    mapDiv.classList.remove('drag');
+  });
+  mapDiv.addEventListener('drop', function (e) {
+    e.preventDefault();
+    mapDiv.classList.remove('drag');
     const file = e.dataTransfer.files[0];
     if (file && !file.name.endsWith('.csv') && file.type !== 'text/csv') {
       setError('Please upload a valid CSV file.');
@@ -183,33 +203,25 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 
-  // --- Header resolution helpers ---
-  function buildHeaderMap(fields) {
-    const map = new Map();
-    for (const f of fields) map.set(f.trim().toLowerCase(), f);
-    return map;
-  }
-  function resolveKey(headerMap, ...candidates) {
-    for (const c of candidates) {
-      const found = headerMap.get(String(c).trim().toLowerCase());
-      if (found) return found;
-    }
-    return '';
-  }
-  function escapeCSV(val) {
-    const s = val == null ? '' : String(val);
-    if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
-    return s;
-  }
-  function escapeHTML(s) {
-    return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/\"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+  // --- Example Button Logic: load World Wonders.csv from repo ---
+  if (exampleBtn) {
+    exampleBtn.addEventListener("click", function() {
+      if (csvInput) csvInput.value = ""; // clear any selection
+      fetch('World%20Wonders.csv').then(resp => {
+        if (!resp.ok) throw new Error('Failed to load example CSV');
+        return resp.text();
+      }).then(text => {
+        setStatus("Loaded example data.");
+        Papa.parse(text, {
+          header: true,
+          skipEmptyLines: true,
+          complete: results => processCSVRows(results.data, results.meta.fields)
+        });
+      }).catch(err => setError(err.message));
+    });
   }
 
+  // --- Processing CSV rows and building map overlays ---
   function processCSVRows(rows, fields) {
     clearAll();
 
@@ -240,11 +252,9 @@ document.addEventListener('DOMContentLoaded', function() {
       const bandRaw = bandKey ? r[bandKey] : '';
       let band = normBandType(bandRaw);
       if (typeof bandRaw === 'string') {
-        const bRaw = bandRaw.trim().toLowerCase();
+        let bRaw = bandRaw.trim().toLowerCase();
         if (['ring', 'stripe', 'both', 'none'].includes(bRaw)) band = bRaw;
       }
-      const dateVal = dateKey ? r[dateKey] : '';
-      const commentVal = commentKey ? r[commentKey] : '';
 
       if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
         skipRows.push({ row: i + 2, reason: 'Invalid or out-of-range lat/lon' });
@@ -293,22 +303,12 @@ document.addEventListener('DOMContentLoaded', function() {
         lat_bin: latBin, lon_bin: lonBin
       });
     }
-    renderLegend();
+    updateBandCountsInFilters();
     if (skipReport) skipReport.textContent = skipRows.length
       ? `Skipped ${skipRows.length} row(s): ` + skipRows.map(s => `row ${s.row} (${s.reason})`).join(', ')
       : '';
-    // Normalized CSV with date/comment columns
-    normalizedCSV = 'lat,lon,label,band_type,date,comment,lat_bin,lon_bin\n' +
-      csvRows.map(r => [
-        r.lat,
-        r.lon,
-        escapeCSV(r.label),
-        r.band_type,
-        escapeCSV(r.date),
-        escapeCSV(r.comment),
-        r.lat_bin,
-        r.lon_bin
-      ].join(',')).join('\n');
+    normalizedCSV = 'lat,lon,label,band_type,lat_bin,lon_bin\n' +
+      csvRows.map(r => [r.lat, r.lon, `"${(r.label + '').replace(/\"/g, '""')}"`, r.band_type, r.lat_bin, r.lon_bin].join(',')).join('\n');
     if (markersData.length) {
       addMarkersAndShading();
       if (downloadBtn) downloadBtn.disabled = false;
@@ -317,7 +317,6 @@ document.addEventListener('DOMContentLoaded', function() {
       setError(`No valid rows found.`);
     }
   }
-
   function makeMarker(lat, lon, band, label) {
     const svg = `<svg width="24" height="24" viewBox="0 0 24 24">
       <circle cx="12" cy="12" r="8" fill="${BAND_COLORS[band] || '#888'}" stroke="#333" stroke-width="1.5"/>
@@ -328,45 +327,31 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 
-  let currentClusters = [];
-  let spiderfiedCluster = null;
-  let currentClusterMarkers = [];
-  let spiderfiedMarkers = [];
-  let lastUnclusterZoom = null;
-
-  function canShowAllLabelsWithoutOverlap(points) {
-    if (!points || points.length <= 1) return true;
-    const pixelPoints = points.map(p => map.latLngToContainerPoint(p.marker.getLatLng()));
-    const LABEL_W = 90, LABEL_H = 28;
-    for (let i = 0; i < pixelPoints.length; ++i) {
-      for (let j = i + 1; j < pixelPoints.length; ++j) {
-        if (Math.abs(pixelPoints[i].x - pixelPoints[j].x) < LABEL_W &&
-            Math.abs(pixelPoints[i].y - pixelPoints[j].y) < LABEL_H) {
-          return false;
-        }
-      }
-    }
-    return true;
-  }
-
   function addMarkersAndShading() {
     if (markerGroup) markerGroup.clearLayers();
-    if (clusterLabelGroup) clusterLabelGroup.clearLayers();
-    if (shadeGroup) shadeGroup.clearLayers();
-
     if (!markerGroup) markerGroup = L.layerGroup();
-    if (!clusterLabelGroup) clusterLabelGroup = L.layerGroup();
-
     map.addLayer(markerGroup);
-    map.addLayer(clusterLabelGroup);
 
-    shadeGroup = L.layerGroup();
-    let shadedLatBands = new Set(), shadedLonBands = new Set();
+    if (shadeGroup) shadeGroup.clearLayers();
+    if (!shadeGroup) shadeGroup = L.layerGroup();
+    map.addLayer(shadeGroup);
+
+    if (labelOverlayGroup) labelOverlayGroup.clearLayers();
+    if (!labelOverlayGroup) labelOverlayGroup = L.layerGroup([], {pane: 'labelPane'});
+    map.addLayer(labelOverlayGroup);
+
+    if (leaderLineGroup) leaderLineGroup.clearLayers();
+    if (!leaderLineGroup) leaderLineGroup = L.layerGroup([], {pane: 'leaderLinePane'});
+    map.addLayer(leaderLineGroup);
+
+    for (const m of markersData) markerGroup.addLayer(m.marker);
+
+    shadedLatBands = new Set();
+    shadedLonBands = new Set();
     for (const data of markersData) {
-      const lat = data.lat, lon = normLon(data.lon);
-      const band = data.band_type;
+      const lat = data.lat, lon = normLon(data.lon), band = data.band_type;
       const latBand = Math.floor((lat + 90) / 10) * 10 - 90;
-      const lonBand = Math.floor((lon + 180) / 10) * 10 - 180;
+      const lonBand = Math.floor((normLon(lon) + 180) / 10) * 10 - 180;
       if (band === 'ring' || band === 'both') {
         if (!shadedLatBands.has(latBand)) {
           shadedLatBands.add(latBand);
@@ -384,304 +369,188 @@ document.addEventListener('DOMContentLoaded', function() {
         }
       }
     }
-    map.addLayer(shadeGroup);
-
+    updateShadedInfo();
+    updateLabelOverlay();
     filterMarkers();
   }
 
-  function updateClusterLabels() {
-    if (!markerGroup || !clusterLabelGroup) return;
-    clusterLabelGroup.clearLayers();
-    currentClusterMarkers = [];
+  // --- Label Placement Logic ---
+  function updateLabelOverlay() {
+    if (!labelOverlayGroup) {
+      labelOverlayGroup = L.layerGroup([], {pane: 'labelPane'});
+      map.addLayer(labelOverlayGroup);
+    }
+    if (!leaderLineGroup) {
+      leaderLineGroup = L.layerGroup([], {pane: 'leaderLinePane'});
+      map.addLayer(leaderLineGroup);
+    }
+    labelOverlayGroup.clearLayers();
+    leaderLineGroup.clearLayers();
 
-    markerGroup.eachLayer(m => {
-      m.unbindTooltip();
-    });
+    if (!markerGroup) return;
 
-    const visibleMarkers = [];
+    let visibleMarkers = [];
     markerGroup.eachLayer(m => {
       if (map.getBounds().contains(m.getLatLng())) visibleMarkers.push(m);
     });
 
-    const clusters = [];
-    const pixelRadius = 36;
-    for (let i = 0; i < visibleMarkers.length; ++i) {
-      const m = visibleMarkers[i];
+    const markerRects = [];
+    for (const m of visibleMarkers) {
       const pt = map.latLngToContainerPoint(m.getLatLng());
-      let found = false;
-      for (const c of clusters) {
-        if (c.points.some(mp => pt.distanceTo(mp.pt) < pixelRadius)) {
-          c.points.push({ marker: m, pt });
-          found = true;
-          break;
+      markerRects.push({ x: pt.x - 12, y: pt.y - 12, w: 24, h: 24 });
+    }
+    const placedLabels = [];
+    const mapSize = map.getSize();
+
+    function measureLabelSize(text) {
+      const temp = document.createElement('div');
+      temp.className = 'marker-nonoverlap-label marker-nonoverlap-label-measure';
+      temp.style.position = 'absolute';
+      temp.style.visibility = 'hidden';
+      temp.textContent = text;
+      document.body.appendChild(temp);
+      const rect = temp.getBoundingClientRect();
+      document.body.removeChild(temp);
+      return {w: Math.ceil(rect.width), h: Math.ceil(rect.height)};
+    }
+    function findFreeLabelPos(center, labelSize, occupiedRects) {
+      const radiusStep = 32;
+      let maxRadius = Math.min(mapSize.x, mapSize.y) / 2;
+      let tryPos = [
+        {dx: 18, dy: -labelSize.h/2},
+        {dx: -labelSize.w-10, dy: -labelSize.h/2},
+        {dx: -labelSize.w/2, dy: -labelSize.h-10},
+        {dx: -labelSize.w/2, dy: 18},
+      ];
+      for (let t = 0; t < tryPos.length; ++t) {
+        let x = center.x + tryPos[t].dx, y = center.y + tryPos[t].dy;
+        if (x < 2 || (x+labelSize.w) > (mapSize.x-2) || y < 2 || (y+labelSize.h) > (mapSize.y-2)) continue;
+        let rect = {x, y, w: labelSize.w, h: labelSize.h};
+        if (!isOverlapping(rect, occupiedRects)) return {x, y};
+      }
+      for (let r = radiusStep; r < maxRadius; r += radiusStep) {
+        for (let a = 0; a < 2*Math.PI; a += Math.PI/6) {
+          let x = center.x + r * Math.cos(a) - labelSize.w/2;
+          let y = center.y + r * Math.sin(a) - labelSize.h/2;
+          if (x < 2 || (x+labelSize.w) > (mapSize.x-2) || y < 2 || (y+labelSize.h) > (mapSize.y-2)) continue;
+          let rect = {x, y, w: labelSize.w, h: labelSize.h};
+          if (!isOverlapping(rect, occupiedRects)) return {x, y};
         }
       }
-      if (!found) {
-        clusters.push({ points: [{ marker: m, pt }] });
-      }
-    }
-
-    currentClusters = clusters;
-
-    clusters.forEach((c, idx) => {
-      const markerObjs = c.points.map(p => markersData.find(md => md.marker === p.marker));
-      if (canShowAllLabelsWithoutOverlap(markerObjs)) {
-        c.points.forEach((p, i) => {
-          const markerData = markerObjs[i];
-          if (markerData && markerData.label) {
-            p.marker.bindTooltip(markerData.label, { direction: 'right', permanent: true, className: 'marker-perm-label' });
-          }
-        });
-        return;
-      }
-      const center = c.points.reduce((acc, p) => [acc[0] + p.pt.x, acc[1] + p.pt.y], [0, 0])
-        .map(x => x / c.points.length);
-      const centerLatLng = map.containerPointToLatLng(center);
-
-      const icon = L.divIcon({
-        html: `<div class="custom-cluster-label" tabindex="0" role="button" aria-label="${c.points.length} points" style="background: rgba(67,160,71,0.38); color: #fff; border-radius: 16px; padding: 2px 12px; font-size: 15px; border: 2px solid #1b5e20; cursor: pointer; min-width: 30px; text-align: center; font-weight: bold;">
-          ${c.points.length}
-        </div>`,
-        className: 'custom-cluster-divicon',
-        iconSize: [36, 36],
-        iconAnchor: [18, 18],
-        pane: 'clusterPane'
-      });
-      const clusterMarker = L.marker(centerLatLng, { icon, keyboard: true, interactive: true, zIndexOffset: 5000 });
-
-      clusterMarker.__clusterPoints = c.points;
-      clusterMarker.__clusterLatLng = centerLatLng;
-
-      clusterMarker.on('click keydown', ev => {
-        if (ev.type === 'keydown' && !['Enter', ' '].includes(ev.originalEvent.key)) return;
-        if (spiderfiedCluster && arraysEqualCluster(spiderfiedCluster.points, c.points)) {
-          unspiderfy();
-        } else {
-          spiderfyCluster(c, centerLatLng, clusterMarker);
+      for (let y = 2; y < mapSize.y - labelSize.h - 2; y += 18) {
+        for (let x = 2; x < mapSize.x - labelSize.w - 2; x += 18) {
+          let rect = {x, y, w: labelSize.w, h: labelSize.h};
+          if (!isOverlapping(rect, occupiedRects)) return {x, y};
         }
-        ev.originalEvent && ev.originalEvent.preventDefault && ev.originalEvent.stopPropagation();
-      });
-
-      clusterLabelGroup.addLayer(clusterMarker);
-      currentClusterMarkers.push(clusterMarker);
-    });
-
-    if (!document.getElementById('custom-cluster-label-style')) {
-      const style = document.createElement('style');
-      style.id = 'custom-cluster-label-style';
-      style.textContent = `
-        .custom-cluster-divicon { box-shadow: 0 1px 5px rgba(0,0,0,0.23); background: transparent; border: none; pointer-events: none; }
-        .custom-cluster-label { pointer-events: auto; }
-        .custom-cluster-label:focus { outline: 2px solid #1976d2; }
-        .marker-perm-label { background: #fff; color: #333; font-size: 13px; border-radius: 5px; border: 1px solid #ccc; box-shadow: 0 1px 3px rgba(0,0,0,0.06); padding: 2px 6px; }
-        .marker-perm-label.cluster-label {
-          background: #1b2342 !important;
-          color: #f6f6f7 !important;
-          border: 1px solid #333 !important;
-          font-weight: 600;
-        }
-      `;
-      document.head.appendChild(style);
+      }
+      return {x: 2, y: 2};
     }
-  }
-
-  function arraysEqualCluster(a, b) {
-    if (!a || !b || a.length !== b.length) return false;
-    const aMarkers = a.map(p => p.marker).sort();
-    const bMarkers = b.map(p => p.marker).sort();
-    for (let i = 0; i < aMarkers.length; ++i) {
-      if (aMarkers[i] !== bMarkers[i]) return false;
+    function isOverlapping(rect, others) {
+      for (const o of others) if (rectsOverlap(rect, o)) return true;
+      return false;
     }
-    return true;
-  }
+    function rectsOverlap(a, b) {
+      return !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y);
+    }
 
-  function spiderfyCluster(cluster, centerLatLng, clusterMarker) {
-    unspiderfy();
-    spiderfiedCluster = cluster;
-
-    const geoPoints = cluster.points.map(p => {
-      const d = markersData.find(md => md.marker === p.marker);
-      return {
-        marker: p.marker,
-        lat: d.lat,
-        lon: d.lon,
-        label: d.label
+    const allOccupiedRects = [...markerRects];
+    for (let i = 0; i < visibleMarkers.length; ++i) {
+      const marker = visibleMarkers[i];
+      const markerData = markersData.find(md => md.marker === marker);
+      if (!markerData || !markerData.label) continue;
+      const labelText = markerData.label;
+      const labelSize = measureLabelSize(labelText);
+      const markerPt = map.latLngToContainerPoint(marker.getLatLng());
+      const labelPos = findFreeLabelPos(markerPt, labelSize, allOccupiedRects);
+      const labelRect = {
+        x: labelPos.x, y: labelPos.y, w: labelSize.w, h: labelSize.h, markerPt
       };
-    });
-
-    const center = {
-      lat: geoPoints.reduce((acc, pt) => acc + pt.lat, 0) / geoPoints.length,
-      lon: geoPoints.reduce((acc, pt) => acc + pt.lon, 0) / geoPoints.length
-    };
-
-    geoPoints.forEach(pt => {
-      pt.angle = Math.atan2(pt.lat - center.lat, pt.lon - center.lon);
-    });
-
-    geoPoints.sort((a, b) => a.angle - b.angle);
-
-    const n = geoPoints.length;
-    let spiderDist = 40 / (map.getZoom() / 2.5);
-    const minRequiredAngle = 80 / spiderDist;
-    let angles = geoPoints.map(pt => pt.angle);
-    let useEvenCircle = false;
-
-    if (n > 1) {
-      angles = angles.map(a => (a + 2 * Math.PI) % (2 * Math.PI)).sort((a, b) => a - b);
-      let minSep = 2 * Math.PI;
-      for (let i = 0; i < n; ++i) {
-        let diff = (angles[(i+1)%n] - angles[i] + 2*Math.PI) % (2*Math.PI);
-        if (diff < minSep) minSep = diff;
-      }
-      if (minSep < minRequiredAngle) {
-        useEvenCircle = true;
-        spiderDist = Math.min(Math.max(110, 40 / (map.getZoom() / 2.5)), 200);
-      }
-    }
-
-    let spiderAngles = [];
-    if (n === 2) {
-      const [north, south] = geoPoints[0].lat >= geoPoints[1].lat ? [0, 1] : [1, 0];
-      spiderAngles[north] = -Math.PI / 2;
-      spiderAngles[south] = Math.PI / 2;
-    } else if (useEvenCircle) {
-      let start = -Math.PI / 2;
-      let step = (2 * Math.PI) / n;
-      spiderAngles = Array.from({length: n}, (_, i) => start + i * step);
-    } else {
-      spiderAngles = geoPoints.map(pt => pt.angle);
-    }
-
-    for (let i = 0; i < n; ++i) {
-      const angle = spiderAngles[i];
-      const offset = L.point(
-        spiderDist * Math.cos(angle),
-        spiderDist * Math.sin(angle)
-      );
-      const spiderLatLng = map.containerPointToLatLng(
-        map.latLngToContainerPoint(centerLatLng).add(offset)
-      );
-      const origIcon = geoPoints[i].marker.options.icon;
-      const label = geoPoints[i].label;
-
-      const spiderMarker = L.marker(spiderLatLng, {
-        icon: origIcon,
-        keyboard: false,
-        interactive: true,
-        zIndexOffset: 9000
+      allOccupiedRects.push(labelRect);
+      placedLabels.push(labelRect);
+      const labelLatLng = map.containerPointToLatLng([labelPos.x + labelSize.w/2, labelPos.y + labelSize.h/2]);
+      const labelDiv = L.divIcon({
+        html: `<div class="marker-nonoverlap-label">${labelText}</div>`,
+        className: '',
+        iconSize: [labelSize.w, labelSize.h],
+        iconAnchor: [labelSize.w/2, labelSize.h/2],
+        pane: 'labelPane'
       });
+      let labelMarker = L.marker(labelLatLng, {icon: labelDiv, keyboard: false, interactive: false, pane: 'labelPane'});
+      labelOverlayGroup.addLayer(labelMarker);
 
-      if (label) {
-        const offsetTooltip = [
-          20 * Math.cos(angle),
-          20 * Math.sin(angle)
-        ];
-        spiderMarker.bindTooltip(label, {
-          permanent: true,
-          direction: 'auto',
-          offset: offsetTooltip,
-          className: 'marker-perm-label cluster-label'
-        });
-      }
-
-      spiderMarker.on('click', unspiderfy);
-      spiderfiedMarkers.push(spiderMarker);
-      spiderMarker.addTo(map);
-    }
-
-    cluster.points.forEach(p => {
-      if (p.marker.getElement()) p.marker.getElement().classList.add('marker-fadeout');
-      p.marker.unbindTooltip();
-    });
-
-    setTimeout(() => {
-      for (const cm of currentClusterMarkers) {
-        if (arraysEqualCluster(cm.__clusterPoints, cluster.points)) {
-          cm.off('click keydown');
-          cm.on('click keydown', function(ev) {
-            if (ev.type === 'keydown' && !['Enter', ' '].includes(ev.originalEvent.key)) return;
-            unspiderfy();
-            ev.originalEvent && ev.originalEvent.preventDefault && ev.originalEvent.stopPropagation();
-          });
+      let labelCenterPx = L.point(labelRect.x + labelSize.w/2, labelRect.y + labelSize.h/2);
+      let markerPx = labelRect.markerPt;
+      let dist = labelCenterPx.distanceTo(markerPx);
+      if (dist > 35) {
+        let candidates = [];
+        let dx = labelCenterPx.x - markerPx.x;
+        let dy = labelCenterPx.y - markerPx.y;
+        let norm = Math.sqrt(dx*dx + dy*dy);
+        let perp = {x: -dy/norm, y: dx/norm};
+        for (let k = -1; k <= 1; k += 0.5) {
+          let offset = 15 * k;
+          let mx = markerPx.x + offset * perp.x;
+          let my = markerPx.y + offset * perp.y;
+          let lx = labelCenterPx.x + offset * perp.x;
+          let ly = labelCenterPx.y + offset * perp.y;
+          let midx = (mx + lx) / 2;
+          let midy = (my + ly) / 2;
+          let controlOffset = 20;
+          let cx = midx + controlOffset * perp.x;
+          let cy = midy + controlOffset * perp.y;
+          candidates.push({start: [mx, my], control: [cx, cy], end: [lx, ly]});
         }
-      }
-      map.once('zoomstart movestart click', unspiderfy);
-      clusterMarker.once('remove', unspiderfy);
-    }, 10);
-  }
-
-  function unspiderfy() {
-    spiderfiedMarkers.forEach(m => map.removeLayer(m));
-    spiderfiedMarkers = [];
-    spiderfiedCluster = null;
-    markerGroup && markerGroup.eachLayer(m => {
-      if (m.getElement()) m.getElement().classList.remove('marker-fadeout');
-      m.unbindTooltip();
-    });
-    updateClusterLabels();
-  }
-
-  map.on('zoomend', function() {
-    if (lastUnclusterZoom !== map.getZoom()) {
-      lastUnclusterZoom = map.getZoom();
-      unspiderfy();
-      updateClusterLabels();
-    }
-  });
-
-  if (!document.getElementById('marker-fadeout-style')) {
-    const style = document.createElement('style');
-    style.id = 'marker-fadeout-style';
-    style.textContent = `
-      .marker-fadeout { opacity: 0.18 !important; transition: opacity 0.4s; }
-    `;
-    document.head.appendChild(style);
-  }
-
-  // --- Help Modal Accessibility and Focus Trap ---
-  const helpBtn = document.getElementById('helpBtn');
-  const helpModal = document.getElementById('helpModal');
-  const helpClose = document.getElementById('helpClose');
-  const helpContent = document.getElementById('helpContent');
-  let lastFocusedElement = null;
-
-  function openModal() {
-    if (!helpModal) return;
-    helpModal.classList.add('active');
-    lastFocusedElement = document.activeElement;
-    if (helpContent) {
-      helpContent.setAttribute('tabindex', '-1');
-      helpContent.focus();
-    }
-    document.body.style.overflow = 'hidden';
-  }
-  function closeModal() {
-    if (!helpModal) return;
-    helpModal.classList.remove('active');
-    document.body.style.overflow = '';
-    if (lastFocusedElement) lastFocusedElement.focus();
-  }
-  if (helpBtn) helpBtn.addEventListener('click', openModal);
-  if (helpClose) helpClose.addEventListener('click', closeModal);
-  window.addEventListener('click', (e) => {
-    if (e.target === helpModal) closeModal();
-  });
-  window.addEventListener('keydown', (e) => {
-    if (!helpModal || !helpModal.classList.contains('active')) return;
-    if (e.key === 'Escape') {
-      closeModal();
-      e.preventDefault();
-    }
-    if (e.key === 'Tab') {
-      const focusables = helpContent ? helpContent.querySelectorAll('button, [tabindex]:not([tabindex="-1"]), a, input, select, textarea') : [];
-      const first = focusables[0], last = focusables[focusables.length - 1];
-      if (!e.shiftKey && document.activeElement === last) {
-        first.focus(); e.preventDefault();
-      }
-      if (e.shiftKey && document.activeElement === first) {
-        last.focus(); e.preventDefault();
+        let bestCandidate = candidates[0];
+        let minIntersections = Infinity;
+        for (let cand of candidates) {
+          let intersections = 0;
+          for (let j = 0; j < visibleMarkers.length; ++j) {
+            if (j === i) continue;
+            let otherMarkerPx = map.latLngToContainerPoint(visibleMarkers[j].getLatLng());
+            if (lineIntersectsCircle(cand.start, cand.control, cand.end, otherMarkerPx, 15)) {
+              intersections++;
+            }
+          }
+          if (intersections < minIntersections) {
+            minIntersections = intersections;
+            bestCandidate = cand;
+          }
+        }
+        let svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.style.position = 'absolute';
+        svg.style.top = '0';
+        svg.style.left = '0';
+        svg.style.width = '100%';
+        svg.style.height = '100%';
+        svg.style.pointerEvents = 'none';
+        let path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        let d = `M ${bestCandidate.start[0]} ${bestCandidate.start[1]} Q ${bestCandidate.control[0]} ${bestCandidate.control[1]} ${bestCandidate.end[0]} ${bestCandidate.end[1]}`;
+        path.setAttribute('d', d);
+        path.setAttribute('stroke', 'yellow');
+        path.setAttribute('stroke-width', '2.5');
+        path.setAttribute('stroke-opacity', '0.90');
+        path.setAttribute('fill', 'none');
+        svg.appendChild(path);
+        let leaderLine = L.marker([0, 0], {
+          icon: L.divIcon({ html: svg.outerHTML, className: '', iconSize: [mapSize.x, mapSize.y], iconAnchor: [0, 0] }),
+          keyboard: false, interactive: false, pane: 'leaderLinePane'
+        }).setLatLng(map.containerPointToLatLng([0, 0]));
+        leaderLineGroup.addLayer(leaderLine);
       }
     }
-  });
+  }
+
+  function lineIntersectsCircle(start, control, end, center, radius) {
+    let steps = 10;
+    for (let t = 0; t <= 1; t += 1/steps) {
+      let x = (1-t)*(1-t)*start[0] + 2*(1-t)*t*control[0] + t*t*end[0];
+      let y = (1-t)*(1-t)*start[1] + 2*(1-t)*t*control[1] + t*t*end[1];
+      let dx = x - center.x, dy = y - center.y;
+      if (dx*dx + dy*dy <= radius*radius) return true;
+    }
+    return false;
+  }
+
+  map.on('zoomend moveend', updateLabelOverlay);
 
 });
