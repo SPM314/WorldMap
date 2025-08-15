@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>World Map • 10° Grid • CSV + Bands (zoom limit + help)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <!-- Papa Parse -->
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <!-- MarkerCluster -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+  <!-- Custom styles -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="controls">
+    <div id="row1">
+      <label><strong>Upload CSV:</strong> <input id="csvInput" type="file" accept=".csv"></label>
+      <div id="dropzone">…or drag & drop CSV here</div>
+      <button id="clearBtn">Clear markers</button>
+      <button id="downloadBtn" disabled>Download normalized CSV</button>
+      <button id="helpBtn" title="Open user guide">Help</button>
+      <span class="status" id="status">Headers: <code>lat, lon, label, (band type)</code>. Abbreviations OK.</span>
+    </div>
+    <div id="row2">
+      <div id="legend" aria-label="Band-type legend"></div>
+      <span>|</span>
+      <label class="filter"><input type="checkbox" id="flt-ring" checked> ring</label>
+      <label class="filter"><input type="checkbox" id="flt-stripe" checked> stripe</label>
+      <label class="filter"><input type="checkbox" id="flt-both" checked> both</label>
+      <label class="filter"><input type="checkbox" id="flt-none" checked> none</label>
+      <span id="allUncheckedWarn">No categories selected – nothing shown.</span>
+    </div>
+    <div id="row3">
+      <span id="skipReport"></span>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <!-- Help Modal (independent) -->
+  <div id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+    <div id="helpContent">
+      <button id="helpClose" aria-label="Close help">Close</button>
+      <h2 id="helpTitle">User Guide – Map Tool</h2>
+      <div id="helpList">
+        <p><strong>Uploading a CSV</strong><br>
+        Use “Choose File” or drag & drop. Required columns: <code>lat</code>, <code>lon</code>, <code>label</code>, <code>band_type</code>.
+        Band type accepts <code>ring</code>, <code>stripe</code>, <code>both</code>, <code>none</code> (abbreviations OK, case-insensitive).
+        Leading whitespace in header names is ignored. Optional columns: <code>date</code> and <code>comment</code>.</p>
+        <p><strong>Marker colors & Interaction</strong><br>
+        Blue = ring, Orange = stripe, Purple = both, Gray = none. Click any marker to view all its data in a popup.</p>
+        <p><strong>Shading</strong><br>
+        Ring shades the 10° latitude band; Stripe shades the 10° longitude band; Both shades both. A band is shaded once even with multiple points.</p>
+        <p><strong>Overlapping points</strong><br>
+        Nearby points are clustered. Click a cluster to fan out (spiderfy) or zoom in to separate.</p>
+        <p><strong>Controls</strong><br>
+        <b>Clear markers</b> removes all markers and shading. <b>Download normalized CSV</b> exports a cleaned copy with normalized values, date/comment columns (if present), and 10° bins. Use the checkboxes to show/hide categories.</p>
+        <p><strong>Troubleshooting</strong><br>
+        Re-uploading the same file is supported. If rows are skipped, reasons appear under the toolbar (e.g., out-of-range lat/lon).</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Your main logic -->
+  <script src="main.js"></script>
+</body>
+</html>
