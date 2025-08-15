@@ -224,42 +224,83 @@ document.addEventListener('DOMContentLoaded', function() {
   // --- Processing CSV rows and building map overlays ---
   function processCSVRows(rows, fields) {
     clearAll();
-    let latKey = '', lonKey = '', labelKey = '', bandKey = '';
-    for (const f of fields) {
-      const n = f.trim().toLowerCase();
-      if (!latKey && (n.startsWith('lat'))) latKey = f;
-      else if (!lonKey && (n.startsWith('lon') || n === 'lng' || n === 'long')) lonKey = f;
-      else if (!labelKey && (n.startsWith('label') || n === 'name')) labelKey = f;
-      else if (!bandKey && (n.includes('band') || n.includes('stripe') || n.includes('ring') || n === 'type')) bandKey = f;
-    }
+
+    const headerMap = buildHeaderMap(fields);
+    const latKey = resolveKey(headerMap, 'lat', 'latitude');
+    const lonKey = resolveKey(headerMap, 'lon', 'lng', 'long', 'longitude');
+    const labelKey = resolveKey(headerMap, 'label', 'name', 'title');
+    const bandKey = resolveKey(headerMap, 'band_type', 'band', 'type', 'stripe', 'ring');
+    const dateKey = resolveKey(headerMap, 'date');
+    const commentKey = resolveKey(headerMap, 'comment', 'notes', 'note', 'description');
+
     if (!latKey || !lonKey || !labelKey) {
       setError('Missing required headers (lat, lon, label).');
       return;
     }
+
+    // Build a set of display field names (trimmed) for all CSV columns
+    const displayFieldNames = fields.map(f => f.trim());
     let skipRows = [];
     let csvRows = [];
-    let bandTypesSet = new Set();
     for (let i = 0; i < rows.length; ++i) {
-      let r = rows[i];
-      let lat = +r[latKey], lon = +r[lonKey], label = r[labelKey];
-      let bandRaw = bandKey ? r[bandKey] : '';
+      const r = rows[i] || {};
+
+      const lat = +r[latKey];
+      const lonSrc = r[lonKey];
+      const lon = +lonSrc;
+      const label = r[labelKey];
+      const bandRaw = bandKey ? r[bandKey] : '';
       let band = normBandType(bandRaw);
       if (typeof bandRaw === 'string') {
         let bRaw = bandRaw.trim().toLowerCase();
         if (['ring', 'stripe', 'both', 'none'].includes(bRaw)) band = bRaw;
       }
+
       if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
         skipRows.push({ row: i + 2, reason: 'Invalid or out-of-range lat/lon' });
         continue;
       }
+
       legendCounts[band] = (legendCounts[band] || 0) + 1;
-      bandTypesSet.add(band);
-      let marker = makeMarker(lat, lon, band, label);
-      markersData.push({ marker, band_type: band, lat, lon, label });
+
+      const latBin = Math.floor((lat + 90) / 10) * 10 - 90;
+      const lonNorm = normLon(lon);
+      const lonBin = Math.floor((lonNorm + 180) / 10) * 10 - 180;
+
+      const marker = makeMarker(lat, lonNorm, band, label);
+
+      // Prepare a display object of all CSV fields (keys trimmed)
+      const rowAllData = {};
+      for (const f of displayFieldNames) {
+        const orig = headerMap.get(f.toLowerCase()) || f; // best-effort
+        rowAllData[f] = r[orig];
+      }
+      // Add canonical/computed fields
+      rowAllData.lat = lat;
+      rowAllData.lon = lonNorm;
+      rowAllData.label = label;
+      rowAllData.band_type = band;
+      rowAllData.date = dateVal || '';
+      rowAllData.comment = commentVal || '';
+      rowAllData.lat_bin = latBin;
+      rowAllData.lon_bin = lonBin;
+
+      // Bind popup showing all data
+      const rowsHtml = Object.keys(rowAllData).map(k => {
+        return `<tr><th style="text-align:left; padding-right:8px; vertical-align:top;">${escapeHTML(k)}</th>` +
+               `<td style="white-space:pre-wrap; max-width:260px;">${escapeHTML(rowAllData[k])}</td></tr>`;
+      }).join('');
+      const popupHtml = `<div style="font-size:13px; line-height:1.35;">
+        <table>${rowsHtml}</table>
+      </div>`;
+      marker.bindPopup(popupHtml, { maxWidth: 320, autoPan: true });
+
+      markersData.push({ marker, band_type: band, lat, lon: lonNorm, label, date: dateVal, comment: commentVal, allFields: rowAllData });
+
       csvRows.push({
-        lat, lon: normLon(lon), label, band_type: band,
-        lat_bin: Math.floor((lat + 90) / 10) * 10 - 90,
-        lon_bin: Math.floor((normLon(lon) + 180) / 10) * 10 - 180
+        lat, lon: lonNorm, label, band_type: band,
+        date: dateVal || '', comment: commentVal || '',
+        lat_bin: latBin, lon_bin: lonBin
       });
     }
     updateBandCountsInFilters();
