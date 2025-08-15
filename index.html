@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>World Map - Rings & Stripes</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="stylesheet" href="style.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/papaparse@5.3.2/papaparse.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <h1>World Map - Rings & Stripes</h1>
+    <div id="controls">
+      <input type="file" id="csvInput" accept=".csv"/>
+      <button id="clearBtn">Clear</button>
+      <button id="downloadBtn" disabled>Download Normalized CSV</button>
+      <button id="helpBtn" aria-controls="helpModal" aria-haspopup="dialog" aria-label="Show user guide">Help</button>
+      <button id="exampleBtn" type="button">Example</button>
+      <span id="status" class="status"></span>
+    </div>
+    <div id="filterbox">
+      <div id="shaded-info"></div>
+      <label><input id="flt-ring"   type="checkbox" checked/><span id="lbl-ring">Ring</span></label>
+      <label><input id="flt-stripe" type="checkbox" checked/><span id="lbl-stripe">Stripe</span></label>
+      <label><input id="flt-both"   type="checkbox" checked/><span id="lbl-both">Both</span></label>
+      <label><input id="flt-none"   type="checkbox" checked/><span id="lbl-none">None</span></label>
+      <span id="allUncheckedWarn" style="display:none; color:#c00;">(At least one must be checked)</span>
+    </div>
+    <div id="skipReport"></div>
+    <div id="map"></div>
+  </div>
+
+  <!-- Modal for Help/User Guide -->
+  <div id="helpModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="helpTitle" style="display:none;">
+    <div id="helpContent" class="modal-content" tabindex="-1">
+      <button id="helpClose" class="modal-close" aria-label="Close">&times;</button>
+      <h2 id="helpTitle">User Guide</h2>
+      <div id="helpGuideText">
+        <ul>
+          <li><b>Upload CSV:</b> Choose or drag a CSV file containing latitude, longitude, label, and band type columns. You can drop the file anywhere on the map area.</li>
+          <li><b>Example:</b> Click the "Example" button to instantly show the World Wonders data set on the map.</li>
+          <li><b>Map:</b> Points are colored by band type; labels are automatically arranged and linked with yellow lines.</li>
+          <li><b>Filter:</b> Use checkboxes to hide/show band types. The number of points per band is shown next to each filter.</li>
+          <li><b>Shaded Info:</b> To the left of the filters, you can see how many rings and stripes have been shaded, and the percentage completed for each (out of 18 for rings, 36 for stripes).</li>
+          <li><b>Download:</b> Click "Download" to save normalized data.</li>
+          <li><b>Help:</b> Click "Help" to see this guide.</li>
+        </ul>
+        <p>Labels never overlap. If a label can't be placed near its point, it will be positioned elsewhere and connected with a yellow line that avoids other points.</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>
