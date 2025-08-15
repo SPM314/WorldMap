@@ -833,7 +833,12 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   // Hide context menu on document click, ESC, and map movestart
-  document.addEventListener('click', hideContextMenu);
+  document.addEventListener('click', function(e) {
+    // Only hide if clicking outside the context menu
+    if (contextMenu && !contextMenu.contains(e.target)) {
+      hideContextMenu();
+    }
+  });
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
       hideContextMenu();
@@ -843,5 +848,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   });
   map.on('movestart', hideContextMenu);
+  map.on('zoomstart', hideContextMenu);
+  map.on('click', hideContextMenu);
 
 });
