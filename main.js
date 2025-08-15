@@ -44,6 +44,14 @@ document.addEventListener('DOMContentLoaded', function() {
   const clearBtn = document.getElementById('clearBtn');
   const downloadBtn = document.getElementById('downloadBtn');
   const dropzone = document.getElementById('dropzone');
+  const exampleBtn = document.getElementById('exampleBtn');
+  const disableClusteringCheckbox = document.getElementById('disable-clustering');
+  
+  // Stats panel elements
+  const totalMarkersEl = document.getElementById('total-markers');
+  const typeCountsEl = document.getElementById('type-counts');
+  const ringStatsEl = document.getElementById('ring-stats');
+  const stripeStatsEl = document.getElementById('stripe-stats');
 
   // --- Filter Checkboxes ---
   const checkboxes = [
@@ -67,6 +75,11 @@ document.addEventListener('DOMContentLoaded', function() {
   let markersData = [];
   let normalizedCSV = '';
   let legendCounts = { ring: 0, stripe: 0, both: 0, none: 0 };
+  
+  // Clustering and stats state
+  let disableClustering = false;
+  let shadedLatBands = new Set();
+  let shadedLonBands = new Set();
 
   // --- UTILITIES: Band Type Normalization ---
   function normBandType(s) {
@@ -106,6 +119,53 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
 
+  // --- STATS PANEL UPDATE ---
+  function updateStats() {
+    if (!totalMarkersEl || !typeCountsEl || !ringStatsEl || !stripeStatsEl) return;
+    
+    // Get currently visible markers based on filters
+    const showTypes = [];
+    if (checkboxes[0] && checkboxes[0].checked) showTypes.push('ring');
+    if (checkboxes[1] && checkboxes[1].checked) showTypes.push('stripe');
+    if (checkboxes[2] && checkboxes[2].checked) showTypes.push('both');
+    if (checkboxes[3] && checkboxes[3].checked) showTypes.push('none');
+    
+    const visibleMarkers = markersData.filter(m => showTypes.includes(m.band_type));
+    const totalVisible = visibleMarkers.length;
+    
+    // Count by type (all data, not just visible)
+    const ringCount = legendCounts.ring || 0;
+    const stripeCount = legendCounts.stripe || 0;
+    const bothCount = legendCounts.both || 0;
+    const noneCount = legendCounts.none || 0;
+    
+    // Update total markers
+    totalMarkersEl.textContent = `${totalVisible} markers`;
+    
+    // Update type counts
+    typeCountsEl.textContent = `R:${ringCount} S:${stripeCount} B:${bothCount} N:${noneCount}`;
+    
+    // Count markers in shaded bands (only visible ones)
+    let markersInShadedRings = 0;
+    let markersInShadedStripes = 0;
+    
+    for (const marker of visibleMarkers) {
+      const latBand = Math.floor((marker.lat + 90) / 10) * 10 - 90;
+      const lonBand = Math.floor((normLon(marker.lon) + 180) / 10) * 10 - 180;
+      
+      if (shadedLatBands.has(latBand)) {
+        markersInShadedRings++;
+      }
+      if (shadedLonBands.has(lonBand)) {
+        markersInShadedStripes++;
+      }
+    }
+    
+    // Update ring and stripe stats
+    ringStatsEl.textContent = `Rings: ${shadedLatBands.size} bands, ${markersInShadedRings} markers`;
+    stripeStatsEl.textContent = `Stripes: ${shadedLonBands.size} bands, ${markersInShadedStripes} markers`;
+  }
+
   // --- CHECKBOX FILTERING ---
   function filterMarkers() {
     if (!markerGroup) return;
@@ -118,10 +178,28 @@ document.addEventListener('DOMContentLoaded', function() {
     for (const m of markersData) {
       if (showTypes.includes(m.band_type)) markerGroup.addLayer(m.marker);
     }
-    updateClusterLabels();
+    if (!disableClustering) {
+      updateClusterLabels();
+    }
     updateCheckboxWarning();
+    updateStats();
   }
   checkboxes.forEach(cb => cb && cb.addEventListener('change', filterMarkers));
+  
+  // --- CLUSTERING TOGGLE ---
+  if (disableClusteringCheckbox) {
+    disableClusteringCheckbox.addEventListener('change', function() {
+      disableClustering = this.checked;
+      if (disableClustering) {
+        // Clear cluster labels and spiderfied markers
+        if (clusterLabelGroup) clusterLabelGroup.clearLayers();
+        unspiderfy();
+      } else {
+        // Re-enable clustering
+        updateClusterLabels();
+      }
+    });
+  }
 
   // --- CLEAR MARKERS AND SHADING ---
   function clearAll() {
@@ -130,7 +208,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (shadeGroup) shadeGroup.clearLayers();
     if (skipReport) skipReport.textContent = '';
     legendCounts = { ring: 0, stripe: 0, both: 0, none: 0 };
+    shadedLatBands.clear();
+    shadedLonBands.clear();
     renderLegend();
+    updateStats();
     if (downloadBtn) downloadBtn.disabled = true;
     normalizedCSV = '';
     markersData = [];
@@ -158,6 +239,47 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     if (file) handleCSVFile(file);
   });
+
+  // --- EXAMPLE CSV LOADING ---
+  if (exampleBtn) {
+    exampleBtn.addEventListener('click', async () => {
+      try {
+        exampleBtn.disabled = true;
+        exampleBtn.textContent = 'Loading...';
+        setStatus('Loading example dataset...');
+        
+        const response = await fetch('data/sample.csv');
+        if (!response.ok) {
+          throw new Error(`Failed to load example CSV: ${response.status} ${response.statusText}`);
+        }
+        
+        const csvText = await response.text();
+        if (typeof Papa === "undefined") {
+          setError("Papa Parse library not loaded.");
+          return;
+        }
+        
+        Papa.parse(csvText, {
+          header: true,
+          skipEmptyLines: true,
+          complete: results => {
+            processCSVRows(results.data, results.meta.fields);
+            setStatus('Example dataset loaded successfully!');
+          },
+          error: error => {
+            setError(`Error parsing example CSV: ${error.message}`);
+          }
+        });
+        
+      } catch (error) {
+        console.error('Error loading example CSV:', error);
+        setError(`Failed to load example dataset: ${error.message}`);
+      } finally {
+        exampleBtn.disabled = false;
+        exampleBtn.textContent = 'Example';
+      }
+    });
+  }
 
   if (dropzone) dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
   if (dropzone) dropzone.addEventListener('dragleave', e => { e.preventDefault(); dropzone.classList.remove('drag'); });
@@ -294,6 +416,7 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     }
     renderLegend();
+    updateStats();
     if (skipReport) skipReport.textContent = skipRows.length
       ? `Skipped ${skipRows.length} row(s): ` + skipRows.map(s => `row ${s.row} (${s.reason})`).join(', ')
       : '';
@@ -361,7 +484,9 @@ document.addEventListener('DOMContentLoaded', function() {
     map.addLayer(clusterLabelGroup);
 
     shadeGroup = L.layerGroup();
-    let shadedLatBands = new Set(), shadedLonBands = new Set();
+    shadedLatBands.clear();
+    shadedLonBands.clear();
+    
     for (const data of markersData) {
       const lat = data.lat, lon = normLon(data.lon);
       const band = data.band_type;
@@ -397,6 +522,21 @@ document.addEventListener('DOMContentLoaded', function() {
     markerGroup.eachLayer(m => {
       m.unbindTooltip();
     });
+
+    // If clustering is disabled, show individual labels for all markers
+    if (disableClustering) {
+      markerGroup.eachLayer(m => {
+        const markerData = markersData.find(md => md.marker === m);
+        if (markerData && markerData.label) {
+          m.bindTooltip(markerData.label, { 
+            direction: 'right', 
+            permanent: true, 
+            className: 'marker-perm-label' 
+          });
+        }
+      });
+      return;
+    }
 
     const visibleMarkers = [];
     markerGroup.eachLayer(m => {
@@ -625,7 +765,9 @@ document.addEventListener('DOMContentLoaded', function() {
     if (lastUnclusterZoom !== map.getZoom()) {
       lastUnclusterZoom = map.getZoom();
       unspiderfy();
-      updateClusterLabels();
+      if (!disableClustering) {
+        updateClusterLabels();
+      }
     }
   });
 

@@ -24,6 +24,7 @@
   <div id="controls">
     <div id="row1">
       <label><strong>Upload CSV:</strong> <input id="csvInput" type="file" accept=".csv"></label>
+      <button id="exampleBtn">Example</button>
       <div id="dropzone">…or drag & drop CSV here</div>
       <button id="clearBtn">Clear markers</button>
       <button id="downloadBtn" disabled>Download normalized CSV</button>
@@ -31,6 +32,18 @@
       <span class="status" id="status">Headers: <code>lat, lon, label, (band type)</code>. Abbreviations OK.</span>
     </div>
     <div id="row2">
+      <div id="stats-panel" class="stats-panel">
+        <div class="stats-section">
+          <strong>Stats:</strong>
+          <span id="total-markers">0 markers</span> |
+          <span id="type-counts">R:0 S:0 B:0 N:0</span>
+        </div>
+        <div class="stats-section">
+          <span id="ring-stats">Rings: 0 bands, 0 markers</span> |
+          <span id="stripe-stats">Stripes: 0 bands, 0 markers</span>
+        </div>
+      </div>
+      <span>|</span>
       <div id="legend" aria-label="Band-type legend"></div>
       <span>|</span>
       <label class="filter"><input type="checkbox" id="flt-ring" checked> ring</label>
@@ -40,6 +53,9 @@
       <span id="allUncheckedWarn">No categories selected – nothing shown.</span>
     </div>
     <div id="row3">
+      <label class="filter">
+        <input type="checkbox" id="disable-clustering"> Disable clustering
+      </label>
       <span id="skipReport"></span>
     </div>
   </div>

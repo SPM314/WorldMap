@@ -20,6 +20,27 @@ html, body { height: 100%; margin: 0; }
 .filter { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 #skipReport { font-size: 12px; color: #b00020; }
 
+/* Stats Panel */
+.stats-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #444;
+  background: #f8f9fa;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+}
+.stats-section {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.stats-panel strong {
+  color: #222;
+}
+
 #allUncheckedWarn {
   color: #b00020;
   font-size: 13px;
