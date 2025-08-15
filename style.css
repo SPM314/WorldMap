@@ -139,3 +139,71 @@
     min-width: 0;
   }
 }
+
+/* Context Menu Styles */
+.context-menu {
+  position: fixed;
+  z-index: 2500;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  padding: 4px 0;
+  min-width: 150px;
+}
+
+.context-menu button {
+  width: 100%;
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+}
+
+.context-menu button:hover {
+  background: #f0f0f0;
+}
+
+/* Marker Dialog Form Styles */
+#markerForm div {
+  margin-bottom: 12px;
+}
+
+#markerForm label {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+#markerForm input,
+#markerForm select,
+#markerForm textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+#markerForm button {
+  padding: 8px 16px;
+  margin-right: 8px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+#markerForm button[type="submit"] {
+  background: #1976d2;
+  color: white;
+  border-color: #1976d2;
+}
+
+#markerForm button[type="submit"]:hover {
+  background: #1565c0;
+}
