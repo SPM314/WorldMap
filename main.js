@@ -235,8 +235,6 @@ document.addEventListener('DOMContentLoaded', function() {
     none:   '#888888'
   };
 
-// === ADD near your existing constants (close to BAND_COLORS / DEFAULT_BAND_COLORS) ===
-
 // Default shapes and sizes
 const DEFAULT_BAND_SHAPES = {
   ring:   { symbol: 'circle', size: 24 },
@@ -462,7 +460,7 @@ function buildMarkerIcon(bandType) {
   const colorRing = document.getElementById('colorRing');
   const colorBoth = document.getElementById('colorBoth');
   const restoreDefaultsBtn = document.getElementById('restoreDefaultsBtn');
-// === Shapes dialog wiring (add below your existing Settings wiring) ===
+// ==== Shapes dialog wiring 
 const shapesDialog = document.getElementById('shapesDialog');
 const shapesClose = document.getElementById('shapesClose');
 const shapesSave = document.getElementById('shapesSave');
