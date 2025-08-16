@@ -1,12 +1,54 @@
+/* Reset so the map can truly fill the viewport */
+html, body { height: 100%; }
+body { margin: 0; }
+
+/* Map fills the full viewport and has no external margins */
 #map {
   width: 100vw;
-  height: 70vh;
-  min-height: 400px;
+  height: 100vh;
+  min-height: 0;
   display: block;
   z-index: 1;
-  margin: 1.25em 0;
+  margin: 0;
   position: relative;
 }
+
+/* Optional: soften side gutters when the world doesn’t fill the width */
+.leaflet-container { background: #cfd8dc; }
+
+/* Band number labels pane: non-interactive and layered correctly */
+.leaflet-pane.bandLabelPane {
+  pointer-events: none;
+  z-index: 368 !important;
+}
+
+/* Wrapper for divIcon: no visuals on the container */
+.band-label-icon {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Numbers only: perfectly centered at the LatLng via child transform. */
+.band-label {
+  position: relative;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  display: inline-block;
+  white-space: nowrap;
+  font: 700 12px/1 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  color: #0b2a3c;
+  background: transparent !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(255,255,255,0.85), 0 0 2px rgba(255,255,255,0.85);
+}
+
+/* Drag state, markers, and other existing styles */
 #map.drag {
   outline: 3px dashed #5e35b1;
   outline-offset: -3px;
@@ -35,7 +77,6 @@
   line-height: 1.25;
 }
 .marker-nonoverlap-label-measure {
-  /* For measurement only, not shown */
   left: -9999px !important;
   top: -9999px !important;
   width: auto !important;
@@ -51,21 +92,13 @@
   stroke: yellow;
   stroke-width: 2.5;
   stroke-opacity: 0.90;
-  stroke-dasharray: none;
   z-index: 999;
 }
 
-.leaflet-pane.labelPane {
-  z-index: 460 !important;
-}
+.leaflet-pane.labelPane { z-index: 460 !important; }
 
-#controls {
-  margin-bottom: 0.7em;
-}
-#legend {
-  margin: 0.7em 0;
-  display: none;
-}
+#controls { margin-bottom: 0.7em; }
+#legend { margin: 0.7em 0; display: none; }
 #filterbox {
   margin-bottom: 0.7em;
   display: flex;
@@ -80,24 +113,13 @@
   min-width: 145px;
   text-align: left;
 }
-#filterbox label {
-  margin-right: 0.7em;
-}
-#filterbox input[type="checkbox"] {
-  margin-right: 3px;
-}
-#allUncheckedWarn {
-  font-size: 0.95em;
-  font-weight: bold;
-}
-.status {
-  margin-left: 1em;
-  color: #1976d2;
-}
-.status.error {
-  color: #b71c1c;
-}
+#filterbox label { margin-right: 0.7em; }
+#filterbox input[type="checkbox"] { margin-right: 3px; }
+#allUncheckedWarn { font-size: 0.95em; font-weight: bold; }
+.status { margin-left: 1em; color: #1976d2; }
+.status.error { color: #b71c1c; }
 
+/* Modal */
 .modal {
   display: none;
   position: fixed;
@@ -108,9 +130,7 @@
   transition: opacity 0.2s;
   justify-content: center; align-items: center;
 }
-.modal.active {
-  display: flex;
-}
+.modal.active { display: flex; }
 .modal-content {
   background: #fff;
   margin: auto;
@@ -140,7 +160,7 @@
   }
 }
 
-/* Context Menu Styles */
+/* Context Menu */
 .context-menu {
   position: fixed;
   z-index: 2500;
@@ -151,7 +171,6 @@
   padding: 4px 0;
   min-width: 150px;
 }
-
 .context-menu button {
   width: 100%;
   padding: 8px 16px;
@@ -162,48 +181,73 @@
   font-size: 14px;
   color: #333;
 }
+.context-menu button:hover { background: #f0f0f0; }
 
-.context-menu button:hover {
-  background: #f0f0f0;
+/* Settings gear */
+.settings-btn {
+  position: fixed; top: 12px; right: 12px; z-index: 2500;
+  width: 36px; height: 36px; border-radius: 8px; border: 1px solid #ddd; background: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.08); cursor: pointer; padding: 0;
+}
+.settings-btn .settings-icon { width: 22px; height: 22px; display: block; pointer-events: none; }
+.settings-btn:hover { filter: brightness(0.97); }
+.settings-btn:active { transform: translateY(1px); }
+#settingsMenu.settings-menu { position: fixed; top: 56px; right: 12px; min-width: 160px; }
+
+/* Filter chips */
+#filterbox label { display: inline-flex; align-items: center; gap: 6px; }
+#filterbox label > span {
+  padding: 2px 10px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.15); font-weight: 500; line-height: 1.6;
+}
+#filterbox label input:not(:checked) + span { opacity: 0.6; }
+#flt-ring   { accent-color: var(--ring-color,   #1976d2); }
+#flt-stripe { accent-color: var(--stripe-color, #f57c00); }
+#flt-both   { accent-color: var(--both-color,   #8e24aa); }
+#flt-none   { accent-color: var(--none-color,   #888888); }
+
+/* Floating header */
+.floating-header {
+  position: fixed; top: 8px; left: 12px; z-index: 2600;
+  background: rgba(255,255,255,0.92); border: 1px solid #e3e3e3; border-radius: 10px;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.08); padding: 8px 12px;
+}
+.floating-title {
+  background: none; border: none; padding: 0; margin: 0;
+  font-size: 22px; font-weight: 700; line-height: 1.2;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  cursor: pointer; color: #111;
+}
+.floating-title:focus-visible { outline: 2px solid #1976d2; border-radius: 4px; }
+.floating-header .header-body[hidden] { display: none !important; }
+.floating-header[aria-expanded="true"] .header-body { display: block !important; margin-top: 8px; }
+
+/* Watermark control (if added earlier) */
+.leaflet-control.watermark {
+  background: rgba(255,255,255,0.78);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font: 12px/1.2 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  color: #2b2b2b;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  pointer-events: none;
+  margin: 0 6px 20px 0;
 }
 
-/* Marker Dialog Form Styles */
-#markerForm div {
-  margin-bottom: 12px;
-}
+/* Remove default margins from headings */
+h1, h2, h3 { margin: 0; }
 
-#markerForm label {
-  display: block;
-  margin-bottom: 4px;
-  font-weight: 500;
-}
-
-#markerForm input,
-#markerForm select,
-#markerForm textarea {
-  width: 100%;
-  padding: 6px 8px;
-  border: 1px solid #ccc;
-  border-radius: 3px;
-  font-size: 14px;
-  box-sizing: border-box;
-}
-
-#markerForm button {
-  padding: 8px 16px;
-  margin-right: 8px;
-  border: 1px solid #ccc;
-  border-radius: 3px;
-  cursor: pointer;
-  font-size: 14px;
-}
-
-#markerForm button[type="submit"] {
-  background: #1976d2;
-  color: white;
-  border-color: #1976d2;
-}
-
-#markerForm button[type="submit"]:hover {
-  background: #1565c0;
+/* Stats badge used only during screenshot */
+.map-screenshot-stats {
+  position: absolute;
+  bottom: 8px;
+  background: rgba(255,255,255,0.85);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font: 600 12px/1.25 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  color: #0b2a3c;
+  text-shadow: 0 1px 2px rgba(255,255,255,0.6);
+  pointer-events: none;
+  z-index: 9999;
+  border: 1px solid rgba(0,0,0,0.12);
 }

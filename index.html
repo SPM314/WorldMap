@@ -5,29 +5,90 @@
   <title>World Map - Rings & Stripes</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <link rel="stylesheet" href="style.css"/>
+  <link rel="stylesheet" href="styles.css"/>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="https://unpkg.com/papaparse@5.3.2/papaparse.min.js"></script>
+  <!-- For screenshotting the map (captures DOM including band labels) -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 </head>
 <body>
   <div id="app">
-    <h1>World Map - Rings & Stripes</h1>
-    <div id="controls">
-      <input type="file" id="csvInput" accept=".csv"/>
-      <button id="clearBtn">Clear</button>
-      <button id="downloadBtn" disabled>Download Normalized CSV</button>
-      <button id="helpBtn" aria-controls="helpModal" aria-haspopup="dialog" aria-label="Show user guide">Help</button>
-      <button id="exampleBtn" type="button">Example</button>
-      <span id="status" class="status"></span>
+    <!-- Settings gear -->
+    <button id="settingsBtn" class="settings-btn" title="Settings" aria-haspopup="menu" aria-controls="settingsMenu" type="button" aria-label="Open settings">
+      <img src="Gear.webp" alt="" class="settings-icon" width="22" height="22" decoding="async">
+    </button>
+
+    <div id="settingsMenu" class="context-menu settings-menu" style="display:none;">
+      <button id="settingsColors" type="button">Colors</button>
+      <button id="settingsShapes" type="button">Shapes</button>
+      <button id="settingsProjections" type="button">Projections</button>
     </div>
-    <div id="filterbox">
-      <div id="shaded-info"></div>
-      <label><input id="flt-ring"   type="checkbox" checked/><span id="lbl-ring">Ring</span></label>
-      <label><input id="flt-stripe" type="checkbox" checked/><span id="lbl-stripe">Stripe</span></label>
-      <label><input id="flt-both"   type="checkbox" checked/><span id="lbl-both">Both</span></label>
-      <label><input id="flt-none"   type="checkbox" checked/><span id="lbl-none">None</span></label>
-      <span id="allUncheckedWarn" style="display:none; color:#c00;">(At least one must be checked)</span>
+
+    <!-- Settings Dialog -->
+    <div id="settingsDialog" class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="modal-content" tabindex="-1">
+        <button id="settingsClose" class="modal-close" aria-label="Close">&times;</button>
+        <h2 id="settingsTitle">Settings</h2>
+
+        <fieldset class="settings-group">
+          <legend>Colors</legend>
+          <div class="settings-row">
+            <label for="colorStripe">Stripe</label>
+            <input id="colorStripe" type="color" value="#f59e0b" />
+          </div>
+          <div class="settings-row">
+            <label for="colorRing">Ring</label>
+            <input id="colorRing" type="color" value="#3b82f6" />
+          </div>
+          <div class="settings-row">
+            <label for="colorBoth">Both</label>
+            <input id="colorBoth" type="color" value="#8b5cf6" />
+          </div>
+          <div class="settings-row">
+            <button id="restoreDefaultsBtn" type="button" class="settings-restore">Restore Defaults</button>
+          </div>
+        </fieldset>
+
+        <div class="settings-actions">
+          <button id="settingsSave" type="button">Save</button>
+          <button id="settingsCancel" type="button">Cancel</button>
+        </div>
+      </div>
     </div>
+
+    <!-- Floating header (click to expand) -->
+    <div id="floatingHeader" class="floating-header" aria-expanded="false">
+      <button id="floatingTitle" class="floating-title" type="button" aria-controls="headerBody" aria-expanded="false">
+        World Map - Rings & Stripes
+      </button>
+      <div id="headerBody" class="header-body" hidden>
+        <div id="controls">
+          <input type="file" id="csvInput" accept=".csv"/>
+          <button id="clearBtn">Clear</button>
+
+          <!-- Save As button + menu -->
+          <button id="saveAsBtn" type="button" aria-haspopup="menu" aria-controls="saveAsMenu">Save As</button>
+          <div id="saveAsMenu" class="context-menu" style="display:none;">
+            <button id="saveAsCsvBtn" type="button">CSV...</button>
+            <button id="saveAsPicBtn" type="button">Picture...</button>
+          </div>
+
+          <button id="helpBtn" aria-controls="helpModal" aria-haspopup="dialog" aria-label="Show user guide">Help</button>
+          <button id="exampleBtn" type="button">Example</button>
+          <span id="status" class="status"></span>
+        </div>
+        <div id="filterbox">
+          <div id="shaded-info"></div>
+          <label><input id="flt-ring"   type="checkbox" checked/><span id="lbl-ring">Ring</span></label>
+          <label><input id="flt-stripe" type="checkbox" checked/><span id="lbl-stripe">Stripe</span></label>
+          <label><input id="flt-both"   type="checkbox" checked/><span id="lbl-both">Both</span></label>
+          <label><input id="flt-none"   type="checkbox" checked/><span id="lbl-none">None</span></label>
+          <span id="allUncheckedWarn" style="display:none; color:#c00;">(At least one must be checked)</span>
+        </div>
+      </div>
+    </div>
+
     <div id="skipReport"></div>
     <div id="map"></div>
   </div>
@@ -40,10 +101,10 @@
     </div>
   </div>
 
-  <!-- Add/Edit Marker Dialog -->
-  <div id="markerDialog" class="modal" style="display:none;">
+  <!-- Add/Edit Marker Dialog (full form) -->
+  <div id="markerDialog" class="modal">
     <div class="modal-content">
-      <button id="markerDialogClose" class="modal-close">&times;</button>
+      <button id="markerDialogClose" class="modal-close" aria-label="Close">&times;</button>
       <h2 id="markerDialogTitle">Add Marker</h2>
       <form id="markerForm">
         <div>
@@ -83,26 +144,144 @@
     </div>
   </div>
 
-  <!-- Modal for Help/User Guide -->
-  <div id="helpModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="helpTitle" style="display:none;">
+<!-- Shapes Settings Modal -->
+<div id="shapesDialog" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Marker Shapes</h3>
+      <button id="shapesClose" aria-label="Close" class="modal-close">×</button>
+    </div>
+    <div class="modal-body">
+      <p>Select the default symbol and size for each band type.</p>
+      <div class="shapes-grid">
+        <div class="shape-row">
+          <label for="shapeStripe">Stripe</label>
+          <select id="shapeStripe">
+            <option value="circle">Circle</option>
+            <option value="triangle">Triangle</option>
+            <option value="diamond">Diamond</option>
+            <option value="square">Square</option>
+            <option value="star">Star (5-point)</option>
+            <option value="star6">Star (6-point)</option>
+            <option value="pin">Pin</option>
+          </select>
+          <label for="sizeStripe" class="size-label">Size</label>
+          <input id="sizeStripe" type="number" min="12" max="48" step="2" />
+          <span class="shape-preview" id="previewStripe" aria-hidden="true"></span>
+        </div>
+
+        <div class="shape-row">
+          <label for="shapeRing">Ring</label>
+          <select id="shapeRing">
+            <option value="circle">Circle</option>
+            <option value="triangle">Triangle</option>
+            <option value="diamond">Diamond</option>
+            <option value="square">Square</option>
+            <option value="star">Star (5-point)</option>
+            <option value="star6">Star (6-point)</option>
+            <option value="pin">Pin</option>
+          </select>
+          <label for="sizeRing" class="size-label">Size</label>
+          <input id="sizeRing" type="number" min="12" max="48" step="2" />
+          <span class="shape-preview" id="previewRing" aria-hidden="true"></span>
+        </div>
+
+        <div class="shape-row">
+          <label for="shapeBoth">Both</label>
+          <select id="shapeBoth">
+            <option value="circle">Circle</option>
+            <option value="triangle">Triangle</option>
+            <option value="diamond">Diamond</option>
+            <option value="square">Square</option>
+            <option value="star">Star (5-point)</option>
+            <option value="star6">Star (6-point)</option>
+            <option value="pin">Pin</option>
+          </select>
+          <label for="sizeBoth" class="size-label">Size</label>
+          <input id="sizeBoth" type="number" min="12" max="48" step="2" />
+          <span class="shape-preview" id="previewBoth" aria-hidden="true"></span>
+        </div>
+
+        <div class="shape-row">
+          <label for="shapeNone">None</label>
+          <select id="shapeNone">
+            <option value="circle">Circle</option>
+            <option value="triangle">Triangle</option>
+            <option value="diamond">Diamond</option>
+            <option value="square">Square</option>
+            <option value="star">Star (5-point)</option>
+            <option value="star6">Star (6-point)</option>
+            <option value="pin">Pin</option>
+          </select>
+          <label for="sizeNone" class="size-label">Size</label>
+          <input id="sizeNone" type="number" min="12" max="48" step="2" />
+          <span class="shape-preview" id="previewNone" aria-hidden="true"></span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button id="shapesRestoreDefaultsBtn" class="btn btn-secondary">Restore Defaults</button>
+      <div class="spacer"></div>
+      <button id="shapesCancel" class="btn btn-secondary">Cancel</button>
+      <button id="shapesSave" class="btn btn-primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Save CSV dialog (remove style="display:none") -->
+<div id="saveCsvModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="saveCsvTitle">
+  <div class="modal-content" tabindex="-1">
+    <button id="saveCsvClose" class="modal-close" aria-label="Close">&times;</button>
+    <h2 id="saveCsvTitle">Save As CSV</h2>
+    <div class="settings-row">
+      <label for="saveCsvName" style="min-width:90px;">File name</label>
+      <input id="saveCsvName" type="text" placeholder="filename.csv">
+    </div>
+    <div class="settings-actions">
+      <button id="saveCsvOk" type="button">Save</button>
+      <button id="saveCsvCancel" type="button">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Save Picture dialog (remove style="display:none") -->
+<div id="savePicModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="savePicTitle">
+  <div class="modal-content" tabindex="-1">
+    <button id="savePicClose" class="modal-close" aria-label="Close">&times;</button>
+    <h2 id="savePicTitle">Save As Picture</h2>
+    <div class="settings-row">
+      <label for="savePicName" style="min-width:90px;">File name</label>
+      <input id="savePicName" type="text" placeholder="map">
+    </div>
+    <div class="settings-row">
+      <label for="savePicFormat" style="min-width:90px;">Format</label>
+      <select id="savePicFormat">
+        <option value="png">PNG</option>
+        <option value="jpeg">JPG</option>
+        <option value="webp">WEBP</option>
+        <option value="gif">GIF</option>
+        <option value="bmp">BMP</option>
+        <option value="tiff">TIFF</option>
+      </select>
+    </div>
+    <div class="settings-actions">
+      <button id="savePicOk" type="button">Save</button>
+      <button id="savePicCancel" type="button">Cancel</button>
+    </div>
+  </div>
+</div>
+
+  <!-- Help Modal -->
+  <div id="helpModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
     <div id="helpContent" class="modal-content" tabindex="-1">
       <button id="helpClose" class="modal-close" aria-label="Close">&times;</button>
       <h2 id="helpTitle">User Guide</h2>
       <div id="helpGuideText">
-        <ul>
-          <li><b>Upload CSV:</b> Choose or drag a CSV file containing latitude, longitude, label, and band type columns. You can drop the file anywhere on the map area.</li>
-          <li><b>Example:</b> Click the "Example" button to instantly show the World Wonders data set on the map.</li>
-          <li><b>Map:</b> Points are colored by band type; labels are automatically arranged and linked with yellow lines.</li>
-          <li><b>Filter:</b> Use checkboxes to hide/show band types. The number of points per band is shown next to each filter.</li>
-          <li><b>Shaded Info:</b> To the left of the filters, you can see how many rings and stripes have been shaded, and the percentage completed for each (out of 18 for rings, 36 for stripes).</li>
-          <li><b>Download:</b> Click "Download" to save normalized data.</li>
-          <li><b>Help:</b> Click "Help" to see this guide.</li>
-        </ul>
-        <p>Labels never overlap. If a label can't be placed near its point, it will be positioned elsewhere and connected with a yellow line that avoids other points.</p>
+        <!-- ... keep your guide content ... -->
       </div>
     </div>
   </div>
+
   <script src="main.js"></script>
 </body>
 </html>
-
