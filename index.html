@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <title>World Map - Rings & Stripes</title>
+  <title>Stripes & Rings</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <link rel="stylesheet" href="style.css"/>
   <link rel="stylesheet" href="styles.css"/>
@@ -15,7 +15,7 @@
 <body>
   <div id="app">
     <!-- Settings gear -->
-    <button id="settingsBtn" class="settings-btn" title="Settings" aria-haspopup="menu" aria-controls="settingsMenu" type="button" aria-label="Open settings">
+    <button id="settingsBtn" class="settings-btn below-header" title="Settings" aria-haspopup="menu" aria-controls="settingsMenu" type="button" aria-label="Open settings">
       <img src="Gear.webp" alt="" class="settings-icon" width="22" height="22" decoding="async">
     </button>
 
@@ -29,10 +29,8 @@
     <div id="settingsDialog" class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <div class="modal-content" tabindex="-1">
         <button id="settingsClose" class="modal-close" aria-label="Close">&times;</button>
-        <h2 id="settingsTitle">Settings</h2>
+        <h3 id="settingsTitle">Colors</h3>
 
-        <fieldset class="settings-group">
-          <legend>Colors</legend>
           <div class="settings-row">
             <label for="colorStripe">Stripe</label>
             <input id="colorStripe" type="color" value="#f59e0b" />
@@ -48,7 +46,7 @@
           <div class="settings-row">
             <button id="restoreDefaultsBtn" type="button" class="settings-restore">Restore Defaults</button>
           </div>
-        </fieldset>
+  
 
         <div class="settings-actions">
           <button id="settingsSave" type="button">Save</button>
@@ -60,7 +58,7 @@
     <!-- Floating header (click to expand) -->
     <div id="floatingHeader" class="floating-header" aria-expanded="false">
       <button id="floatingTitle" class="floating-title" type="button" aria-controls="headerBody" aria-expanded="false">
-        World Map - Rings & Stripes
+        Stripes & Rings
       </button>
       <div id="headerBody" class="header-body" hidden>
         <div id="controls">
@@ -222,8 +220,8 @@
     <div class="modal-footer">
       <button id="shapesRestoreDefaultsBtn" class="btn btn-secondary">Restore Defaults</button>
       <div class="spacer"></div>
-      <button id="shapesCancel" class="btn btn-secondary">Cancel</button>
       <button id="shapesSave" class="btn btn-primary">Save</button>
+      <button id="shapesCancel" class="btn btn-secondary">Cancel</button>
     </div>
   </div>
 </div>

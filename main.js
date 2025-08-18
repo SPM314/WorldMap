@@ -862,12 +862,12 @@ document.addEventListener('keydown', (e) => {
   }
 
   function buildHeaderMap(fields) {
-    const map = new Map();
+    const headerMap = new Map();
     (fields || []).forEach(f => {
       if (f == null) return;
-      map.set(String(f).trim().toLowerCase(), f);
+      headerMap.set(String(f).trim().toLowerCase(), f);
     });
-    return map;
+    return headerMap;
   }
   function resolveKey(headerMap, ...candidates) {
     for (const name of candidates) {
@@ -1388,34 +1388,71 @@ function processCSVRows(rows, fields) {
     });
     let labelSizes = labelTexts.map(txt => measureLabelSize(txt));
 
-    // For each marker, generate candidate label positions
-    function generateLabelCandidates(marker, size) {
-      const center = map.latLngToContainerPoint(marker.getLatLng());
-      let candidates = [];
-      let tryPos = [
-        {dx: 18, dy: -size.h/2},
-        {dx: -size.w-10, dy: -size.h/2},
-        {dx: -size.w/2, dy: -size.h-10},
-        {dx: -size.w/2, dy: 18},
-      ];
-      for (let t = 0; t < tryPos.length; ++t) {
-        let x = center.x + tryPos[t].dx, y = center.y + tryPos[t].dy;
-        if (x < 2 || (x+size.w) > (mapSize.x-2) || y < 2 || (y+size.h) > (mapSize.y-2)) continue;
-        candidates.push({x, y});
+    // Compute best label positions and render labels/lines
+    let bestLabelPositions = findBestLabelPositions(visibleMarkers, labelSizes);
+    let labelRects = [];
+    for (let i = 0; i < visibleMarkers.length; ++i) {
+      const marker = visibleMarkers[i];
+      const labelText = labelTexts[i];
+      if (!labelText) continue;
+      const labelSize = labelSizes[i];
+      const labelPos = bestLabelPositions[i];
+      if (!labelPos) continue;
+      const markerPt = map.latLngToContainerPoint(marker.getLatLng());
+      const labelRect = { x: labelPos.x, y: labelPos.y, w: labelSize.w, h: labelSize.h, markerPt };
+      labelRects.push(labelRect);
+
+      const labelLatLng = map.containerPointToLatLng([labelPos.x + labelSize.w/2, labelPos.y + labelSize.h/2]);
+      const labelDiv = L.divIcon({
+        html: `<div class=\"marker-nonoverlap-label\">${labelText}</div>`,
+        className: '',
+        iconSize: [labelSize.w, labelSize.h],
+        iconAnchor: [labelSize.w/2, labelSize.h/2],
+        pane: 'labelPane'
+      });
+      let labelMarker = L.marker(labelLatLng, {icon: labelDiv, keyboard: false, interactive: false, pane: 'labelPane'});
+      labelOverlayGroup.addLayer(labelMarker);
+
+      // Leader line (curved)
+      let labelCenterPx = [labelRect.x + labelSize.w/2, labelRect.y + labelSize.h/2];
+      let markerPx = [labelRect.markerPt.x, labelRect.markerPt.y];
+      let dist = Math.hypot(labelCenterPx[0] - markerPx[0], labelCenterPx[1] - markerPx[1]);
+      if (dist > 25) {
+        const start = markerPx;
+        const end = labelCenterPx;
+        // Quadratic Bézier control point: offset perpendicular to the line for a gentle curve
+        const mx = (start[0] + end[0]) / 2;
+        const my = (start[1] + end[1]) / 2;
+        const dx = end[0] - start[0], dy = end[1] - start[1];
+        const norm = Math.hypot(dx, dy);
+        const perp = norm > 0 ? [-(dy/norm)*30, (dx/norm)*30] : [0,0];
+        const cx = mx + perp[0], cy = my + perp[1];
+        // Build a full-map SVG overlay so the line stays stable on pan/zoom
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.style.position = 'absolute';
+        svg.style.top = '0';
+        svg.style.left = '0';
+        svg.style.width = '100%';
+        svg.style.height = '100%';
+        svg.style.pointerEvents = 'none';
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const d = `M ${start[0]} ${start[1]} Q ${cx} ${cy} ${end[0]} ${end[1]}`;
+        path.setAttribute('d', d);
+        path.setAttribute('stroke', 'black');
+        path.setAttribute('stroke-width', '2.5');
+        path.setAttribute('stroke-opacity', '0.90');
+        path.setAttribute('stroke-linecap', 'round');
+        path.setAttribute('fill', 'none');
+        svg.appendChild(path);
+        const mapSize = map.getSize();
+        const leaderLine = L.marker([0, 0], {
+          icon: L.divIcon({ html: svg.outerHTML, className: '', iconSize: [mapSize.x, mapSize.y], iconAnchor: [0, 0] }),
+          keyboard: false, interactive: false, pane: 'leaderLinePane'
+        }).setLatLng(map.containerPointToLatLng([0, 0]));
+        leaderLineGroup.addLayer(leaderLine);
       }
-      // Add more radial positions
-      const radiusStep = 32;
-      let maxRadius = Math.min(mapSize.x, mapSize.y) / 2;
-      for (let r = radiusStep; r < maxRadius; r += radiusStep) {
-        for (let a = 0; a < 2*Math.PI; a += Math.PI/6) {
-          let x = center.x + r * Math.cos(a) - size.w/2;
-          let y = center.y + r * Math.sin(a) - size.h/2;
-          if (x < 2 || (x+size.w) > (mapSize.x-2) || y < 2 || (y+size.h) > (mapSize.y-2)) continue;
-          candidates.push({x, y});
-        }
-      }
-      return candidates;
     }
+  } // <-- Close updateLabelOverlay
 
     // Helper: Check if two line segments intersect
     function linesIntersectArr(a, b, c, d) {
@@ -1439,11 +1476,22 @@ function processCSVRows(rows, fields) {
           p2[0] >= rx && p2[0] <= rx+rw && p2[1] >= ry && p2[1] <= ry+rh) return true;
       return false;
     }
-
     // Greedy global assignment
     function findBestLabelPositions(markerList, labelSizes) {
       // Generate candidates for each marker
-      const allCandidates = markerList.map((marker, i) => generateLabelCandidates(marker, labelSizes[i]));
+      const mapSize = map.getSize();
+      const allMarkerRects = markerList.map(marker => {
+        const pt = map.latLngToContainerPoint(marker.getLatLng());
+        return {x: pt.x, y: pt.y, r: 12};
+      });
+      // Expose for candidate function
+      window._allMarkerRects = allMarkerRects;
+      let allCandidates = markerList.map((marker, i) => {
+        window._myMarkerIdx = i;
+        return generateLabelCandidates(marker, labelSizes[i], map, mapSize);
+      });
+      delete window._allMarkerRects;
+      delete window._myMarkerIdx;
       let assigned = Array(markerList.length).fill(null);
       let occupiedRects = [];
       for (let i = 0; i < markerList.length; ++i) {
@@ -1466,12 +1514,77 @@ function processCSVRows(rows, fields) {
           }
           let score = overlap + crossings;
           if (score < bestScore) { bestScore = score; best = pos; }
+       
         }
         assigned[i] = best;
         occupiedRects.push({x: best.x, y: best.y, w: labelSizes[i].w, h: labelSizes[i].h});
       }
-          return assigned;
+        return assigned;
+      }
+    } // <-- Add this closing brace to end the DOMContentLoaded handler
+  );
+
+// Utility: Measure the pixel size of a label string
+function measureLabelSize(text) {
+  // Create a hidden span for measurement
+  const span = document.createElement('span');
+  span.style.visibility = 'hidden';
+  span.style.position = 'absolute';
+  span.style.whiteSpace = 'nowrap';
+  span.style.font = '16px Arial, sans-serif'; // Match your label font if different
+  span.innerText = text;
+  document.body.appendChild(span);
+  const rect = span.getBoundingClientRect();
+  document.body.removeChild(span);
+  return { w: Math.ceil(rect.width) + 8, h: Math.ceil(rect.height) + 4 };
+}
+
+// For each marker, generate candidate label positions
+
+    // ...existing code...
+
+    // For each marker, generate candidate label positions
+    function generateLabelCandidates(marker, size, map, mapSize) {
+      const center = map.latLngToContainerPoint(marker.getLatLng());
+      let candidates = [];
+      let tryPos = [
+        {dx: 18, dy: -size.h/2},
+        {dx: -size.w-10, dy: -size.h/2},
+        {dx: -size.w/2, dy: -size.h-10},
+        {dx: -size.w/2, dy: 18},
+      ];
+      // Get all marker rects for overlap check
+      const allMarkerRects = window._allMarkerRects || [];
+      const myMarkerIdx = window._myMarkerIdx;
+      function overlapsAnyMarker(x, y) {
+        const rect = {x, y, w: size.w, h: size.h};
+        for (let i = 0; i < allMarkerRects.length; ++i) {
+          if (i === myMarkerIdx) continue;
+          const m = allMarkerRects[i];
+          const cx = m.x, cy = m.y, r = m.r;
+          let closestX = Math.max(rect.x, Math.min(cx, rect.x + rect.w));
+          let closestY = Math.max(rect.y, Math.min(cy, rect.y + rect.h));
+          let distSq = (closestX - cx) * (closestX - cx) + (closestY - cy) * (closestY - cy);
+          if (distSq < r * r) return true;
         }
-      } // <-- Close updateLabelOverlay
-    
-    }); // <-- Close DOMContentLoaded event listener
+        return false;
+      }
+      for (let t = 0; t < tryPos.length; ++t) {
+        let x = center.x + tryPos[t].dx, y = center.y + tryPos[t].dy;
+        if (x < 2 || (x+size.w) > (mapSize.x-2) || y < 2 || (y+size.h) > (mapSize.y-2)) continue;
+        if (overlapsAnyMarker(x, y)) continue;
+        candidates.push({x, y});
+      }
+      const radiusStep = 32;
+      let maxRadius = Math.min(mapSize.x, mapSize.y) / 2;
+      for (let r = radiusStep; r < maxRadius; r += radiusStep) {
+        for (let a = 0; a < 2*Math.PI; a += Math.PI/6) {
+          let x = center.x + r * Math.cos(a) - size.w/2;
+          let y = center.y + r * Math.sin(a) - size.h/2;
+          if (x < 2 || (x+size.w) > (mapSize.x-2) || y < 2 || (y+size.h) > (mapSize.y-2)) continue;
+          if (overlapsAnyMarker(x, y)) continue;
+          candidates.push({x, y});
+        }
+      }
+      return candidates;
+    }
