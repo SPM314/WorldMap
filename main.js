@@ -1380,511 +1380,98 @@ function processCSVRows(rows, fields) {
       if (map.getBounds().contains(m.getLatLng())) visibleMarkers.push(m);
     });
 
-    const markerRects = [];
-    for (const m of visibleMarkers) {
-      const pt = map.latLngToContainerPoint(m.getLatLng());
-      markerRects.push({ x: pt.x - 12, y: pt.y - 12, w: 24, h: 24 });
-    }
-    const mapSize = map.getSize();
+    // --- Improved label placement and leader lines ---
+    // Compute label sizes
+    let labelTexts = visibleMarkers.map(marker => {
+      const markerData = markersData.find(md => md.marker === marker);
+      return markerData && markerData.label ? markerData.label : '';
+    });
+    let labelSizes = labelTexts.map(txt => measureLabelSize(txt));
 
-    function measureLabelSize(text) {
-      const temp = document.createElement('div');
-      temp.className = 'marker-nonoverlap-label marker-nonoverlap-label-measure';
-      temp.style.position = 'absolute';
-      temp.style.visibility = 'hidden';
-      temp.textContent = text;
-      document.body.appendChild(temp);
-      const rect = temp.getBoundingClientRect();
-      document.body.removeChild(temp);
-      return {w: Math.ceil(rect.width), h: Math.ceil(rect.height)};
-    }
-    function rectsOverlap(a, b) {
-      return !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y);
-    }
-    function isOverlapping(rect, others) {
-      for (const o of others) if (rectsOverlap(rect, o)) return true;
-      return false;
-    }
-    function findFreeLabelPos(center, labelSize, occupiedRects) {
-      const radiusStep = 32;
-      let maxRadius = Math.min(mapSize.x, mapSize.y) / 2;
+    // For each marker, generate candidate label positions
+    function generateLabelCandidates(marker, size) {
+      const center = map.latLngToContainerPoint(marker.getLatLng());
+      let candidates = [];
       let tryPos = [
-        {dx: 18, dy: -labelSize.h/2},
-        {dx: -labelSize.w-10, dy: -labelSize.h/2},
-        {dx: -labelSize.w/2, dy: -labelSize.h-10},
-        {dx: -labelSize.w/2, dy: 18},
+        {dx: 18, dy: -size.h/2},
+        {dx: -size.w-10, dy: -size.h/2},
+        {dx: -size.w/2, dy: -size.h-10},
+        {dx: -size.w/2, dy: 18},
       ];
       for (let t = 0; t < tryPos.length; ++t) {
         let x = center.x + tryPos[t].dx, y = center.y + tryPos[t].dy;
-        if (x < 2 || (x+labelSize.w) > (mapSize.x-2) || y < 2 || (y+labelSize.h) > (mapSize.y-2)) continue;
-        let rect = {x, y, w: labelSize.w, h: labelSize.h};
-        if (!isOverlapping(rect, occupiedRects)) return {x, y};
+        if (x < 2 || (x+size.w) > (mapSize.x-2) || y < 2 || (y+size.h) > (mapSize.y-2)) continue;
+        candidates.push({x, y});
       }
+      // Add more radial positions
+      const radiusStep = 32;
+      let maxRadius = Math.min(mapSize.x, mapSize.y) / 2;
       for (let r = radiusStep; r < maxRadius; r += radiusStep) {
         for (let a = 0; a < 2*Math.PI; a += Math.PI/6) {
-          let x = center.x + r * Math.cos(a) - labelSize.w/2;
-          let y = center.y + r * Math.sin(a) - labelSize.h/2;
-          if (x < 2 || (x+labelSize.w) > (mapSize.x-2) || y < 2 || (y+labelSize.h) > (mapSize.y-2)) continue;
-          let rect = {x, y, w: labelSize.w, h: labelSize.h};
-          if (!isOverlapping(rect, occupiedRects)) return {x, y};
+          let x = center.x + r * Math.cos(a) - size.w/2;
+          let y = center.y + r * Math.sin(a) - size.h/2;
+          if (x < 2 || (x+size.w) > (mapSize.x-2) || y < 2 || (y+size.h) > (mapSize.y-2)) continue;
+          candidates.push({x, y});
         }
       }
-      for (let y = 2; y < mapSize.y - labelSize.h - 2; y += 18) {
-        for (let x = 2; x < mapSize.x - labelSize.w - 2; x += 18) {
-          let rect = {x, y, w: labelSize.w, h: labelSize.h};
-          if (!isOverlapping(rect, occupiedRects)) return {x, y};
-        }
-      }
-      return {x: 2, y: 2};
+      return candidates;
     }
 
-    const allOccupiedRects = [...markerRects];
-    for (let i = 0; i < visibleMarkers.length; ++i) {
-      const marker = visibleMarkers[i];
-      const markerData = markersData.find(md => md.marker === marker);
-      if (!markerData || !markerData.label) continue;
-      const labelText = markerData.label;
-      const labelSize = measureLabelSize(labelText);
-      const markerPt = map.latLngToContainerPoint(marker.getLatLng());
-      const labelPos = findFreeLabelPos(markerPt, labelSize, allOccupiedRects);
-      const labelRect = { x: labelPos.x, y: labelPos.y, w: labelSize.w, h: labelSize.h, markerPt };
-      allOccupiedRects.push(labelRect);
+    // Helper: Check if two line segments intersect
+    function linesIntersectArr(a, b, c, d) {
+      function ccw(p1, p2, p3) {
+        return (p3[1]-p1[1])*(p2[0]-p1[0]) > (p2[1]-p1[1])*(p3[0]-p1[0]);
+      }
+      return (ccw(a,c,d) !== ccw(b,c,d)) && (ccw(a,b,c) !== ccw(a,b,d));
+    }
+    // Helper: Check if a line segment crosses a rectangle
+    function lineSegIntersectsRect(p1, p2, rect) {
+      let rx = rect.x, ry = rect.y, rw = rect.w, rh = rect.h;
+      let corners = [
+        [rx, ry], [rx+rw, ry], [rx+rw, ry+rh], [rx, ry+rh]
+      ];
+      for (let i = 0; i < 4; ++i) {
+        let q1 = corners[i], q2 = corners[(i+1)%4];
+        if (linesIntersectArr(p1, p2, q1, q2)) return true;
+      }
+      // Also check if segment is fully inside rect
+      if (p1[0] >= rx && p1[0] <= rx+rw && p1[1] >= ry && p1[1] <= ry+rh &&
+          p2[0] >= rx && p2[0] <= rx+rw && p2[1] >= ry && p2[1] <= ry+rh) return true;
+      return false;
+    }
 
-      const labelLatLng = map.containerPointToLatLng([labelPos.x + labelSize.w/2, labelPos.y + labelSize.h/2]);
-      const labelDiv = L.divIcon({
-        html: `<div class="marker-nonoverlap-label">${labelText}</div>`,
-        className: '',
-        iconSize: [labelSize.w, labelSize.h],
-        iconAnchor: [labelSize.w/2, labelSize.h/2],
-        pane: 'labelPane'
-      });
-      let labelMarker = L.marker(labelLatLng, {icon: labelDiv, keyboard: false, interactive: false, pane: 'labelPane'});
-      labelOverlayGroup.addLayer(labelMarker);
-
-      // Leader line (curved)
-      let labelCenterPx = L.point(labelRect.x + labelSize.w/2, labelRect.y + labelSize.h/2);
-      let markerPx = labelRect.markerPt;
-      let dist = labelCenterPx.distanceTo(markerPx);
-
-      // Draw a curved leader line only if the label is sufficiently far
-      if (dist > 25) {
-        // Start at the TRUE marker center
-        const start = [markerPx.x, markerPx.y];
-        const end = [labelCenterPx.x, labelCenterPx.y];
-
-        // Choose the control point along the perpendicular to bend the curve,
-        // but do NOT move the start/end away from the centers.
-        const dx = end[0] - start[0];
-        const dy = end[1] - start[1];
-        const norm = Math.hypot(dx, dy) || 1;
-        const perp = { x: -dy / norm, y: dx / norm };
-
-        const controlOffset = 20;
-        const kVals = [-1, -0.5, 0, 0.5, 1];
-
-        function controlFor(k) {
-          const midx = (start[0] + end[0]) / 2;
-          const midy = (start[1] + end[1]) / 2;
-          return [midx + controlOffset * k * perp.x, midy + controlOffset * k * perp.y];
-        }
-
-        // Pick the control point that intersects the fewest other markers
-        let best = { k: 0, ctrl: controlFor(0), hits: Infinity };
-        for (const k of kVals) {
-          const ctrl = controlFor(k);
-          let intersections = 0;
-          for (let j = 0; j < visibleMarkers.length; ++j) {
-            const other = visibleMarkers[j];
-            if (other === marker) continue;
-            const otherPx = map.latLngToContainerPoint(other.getLatLng());
-            if (lineIntersectsCircle(start, ctrl, end, otherPx, 15)) {
-              intersections++;
-            }
+    // Greedy global assignment
+    function findBestLabelPositions(markerList, labelSizes) {
+      // Generate candidates for each marker
+      const allCandidates = markerList.map((marker, i) => generateLabelCandidates(marker, labelSizes[i]));
+      let assigned = Array(markerList.length).fill(null);
+      let occupiedRects = [];
+      for (let i = 0; i < markerList.length; ++i) {
+        let best = null, bestScore = Infinity;
+        for (const pos of allCandidates[i]) {
+          let rect = {x: pos.x, y: pos.y, w: labelSizes[i].w, h: labelSizes[i].h};
+          // Overlap penalty
+          let overlap = 0;
+          for (const o of occupiedRects) if (!(rect.x+rect.w<=o.x||o.x+o.w<=rect.x||rect.y+rect.h<=o.y||o.y+o.h<=rect.y)) overlap += 1000;
+          // Leader line crossing penalty
+          let crossings = 0;
+          let labelCenterPx = [rect.x + rect.w/2, rect.y + rect.h/2];
+          let markerPx = map.latLngToContainerPoint(markerList[i].getLatLng());
+          for (let j = 0; j < occupiedRects.length; ++j) {
+            let other = occupiedRects[j];
+            let otherCenter = [other.x + other.w/2, other.y + other.h/2];
+            let otherMarkerPx = map.latLngToContainerPoint(markerList[j].getLatLng());
+            if (linesIntersectArr([markerPx.x, markerPx.y], labelCenterPx, [otherMarkerPx.x, otherMarkerPx.y], otherCenter)) crossings += 100;
+            if (lineSegIntersectsRect([markerPx.x, markerPx.y], labelCenterPx, other)) crossings += 100;
           }
-          if (intersections < best.hits) best = { k, ctrl, hits: intersections };
+          let score = overlap + crossings;
+          if (score < bestScore) { bestScore = score; best = pos; }
         }
-
-        // Build a full-map SVG overlay so the curve stays stable on pan/zoom
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.style.position = 'absolute';
-        svg.style.top = '0';
-        svg.style.left = '0';
-        svg.style.width = '100%';
-        svg.style.height = '100%';
-        svg.style.pointerEvents = 'none';
-
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        const d = `M ${start[0]} ${start[1]} Q ${best.ctrl[0]} ${best.ctrl[1]} ${end[0]} ${end[1]}`;
-        path.setAttribute('d', d);
-        path.setAttribute('stroke', 'black');
-        path.setAttribute('stroke-width', '2.5');
-        path.setAttribute('stroke-opacity', '0.90');
-        path.setAttribute('stroke-linecap', 'round'); // nice rounded ends at the marker center
-        path.setAttribute('fill', 'none');
-        svg.appendChild(path);
-
-        const mapSize = map.getSize();
-        const leaderLine = L.marker([0, 0], {
-          icon: L.divIcon({ html: svg.outerHTML, className: '', iconSize: [mapSize.x, mapSize.y], iconAnchor: [0, 0] }),
-          keyboard: false, interactive: false, pane: 'leaderLinePane'
-        }).setLatLng(map.containerPointToLatLng([0, 0]));
-        leaderLineGroup.addLayer(leaderLine);
+        assigned[i] = best;
+        occupiedRects.push({x: best.x, y: best.y, w: labelSizes[i].w, h: labelSizes[i].h});
       }
-    }
-  }
-
-  function lineIntersectsCircle(start, control, end, center, radius) {
-    let steps = 10;
-    for (let t = 0; t <= 1; t += 1/steps) {
-      let x = (1-t)*(1-t)*start[0] + 2*(1-t)*t*control[0] + t*t*end[0];
-      let y = (1-t)*(1-t)*start[1] + 2*(1-t)*t*control[1] + t*t*end[1];
-      let dx = x - center.x, dy = y - center.y;
-      if (dx*dx + dy*dy <= radius*radius) return true;
-    }
-    return false;
-  }
-
-  map.on('zoomend moveend', updateLabelOverlay);
-
-  // --- Context Menu UX ---
-  const contextMenu = document.getElementById('contextMenu');
-  const addMarkerBtn = document.getElementById('addMarkerBtn');
-  const editMarkerBtn = document.getElementById('editMarkerBtn');
-  const markerDialog = document.getElementById('markerDialog');
-  const markerDialogTitle = document.getElementById('markerDialogTitle');
-  const markerDialogClose = document.getElementById('markerDialogClose');
-  const markerDialogCancel = document.getElementById('markerDialogCancel');
-  const markerForm = document.getElementById('markerForm');
-  const markerLat = document.getElementById('markerLat');
-  const markerLon = document.getElementById('markerLon');
-  const markerLabel = document.getElementById('markerLabel');
-  const markerBandType = document.getElementById('markerBandType');
-  const markerDate = document.getElementById('markerDate');
-  const markerComment = document.getElementById('markerComment');
-
-  let contextMenuMode = 'map';
-  let clickedLatLng = null;
-  let selectedMarkerData = null;
-
-  map.on('contextmenu', function(e) {
-    contextMenuMode = 'map';
-    clickedLatLng = e.latlng;
-    selectedMarkerData = null;
-    if (addMarkerBtn) addMarkerBtn.style.display = 'block';
-    if (editMarkerBtn) editMarkerBtn.style.display = 'none';
-    showContextMenu(e.originalEvent.clientX, e.originalEvent.clientY);
-  });
-
-  function attachMarkerContextMenu(marker, rowRef) {
-    marker.on('contextmenu', function(e) {
-      L.DomEvent.stopPropagation(e);
-      contextMenuMode = 'marker';
-      clickedLatLng = null;
-      selectedMarkerData = rowRef;
-      if (addMarkerBtn) addMarkerBtn.style.display = 'none';
-      if (editMarkerBtn) editMarkerBtn.style.display = 'block';
-      showContextMenu(e.originalEvent.clientX, e.originalEvent.clientY);
-    });
-  }
-
-  // Wrap addMarkersAndShading to attach context menus
-  const _origAddMarkersAndShading = addMarkersAndShading;
-  addMarkersAndShading = function() {
-    for (const d of markersData) attachMarkerContextMenu(d.marker, d);
-    _origAddMarkersAndShading();
-  };
-
-  function showContextMenu(x, y) {
-    if (!contextMenu) return;
-    contextMenu.style.display = 'block';
-    contextMenu.style.left = x + 'px';
-    contextMenu.style.top = y + 'px';
-  }
-  function hideContextMenu() { if (contextMenu) contextMenu.style.display = 'none'; }
-
-  if (addMarkerBtn) addMarkerBtn.addEventListener('click', function() { hideContextMenu(); openAddDialog(clickedLatLng); });
-  if (editMarkerBtn) editMarkerBtn.addEventListener('click', function() { hideContextMenu(); openEditDialog(selectedMarkerData); });
-
-  function openAddDialog(latlng) {
-    if (!markerDialog || !latlng) return;
-    if (markerDialogTitle) markerDialogTitle.textContent = 'Add Marker';
-    if (markerLat) markerLat.value = latlng.lat.toFixed(6);
-    if (markerLon) markerLon.value = latlng.lng.toFixed(6);
-    if (markerLabel) markerLabel.value = '';
-    if (markerBandType) markerBandType.value = 'both';
-    if (markerDate) markerDate.value = '';
-    if (markerComment) markerComment.value = '';
-    markerDialog.classList.add('active');
-  }
-  function openEditDialog(md) {
-    if (!markerDialog || !md) return;
-    if (markerDialogTitle) markerDialogTitle.textContent = 'Edit Marker';
-    if (markerLat) markerLat.value = md.lat.toFixed(6);
-    if (markerLon) markerLon.value = md.lon.toFixed(6);
-    if (markerLabel) markerLabel.value = md.label || '';
-    if (markerBandType) markerBandType.value = md.band_type || 'both';
-    if (markerDate) markerDate.value = md.date || '';
-    if (markerComment) markerComment.value = md.comment || '';
-    markerDialog.classList.add('active');
-  }
-  if (markerDialogClose) markerDialogClose.addEventListener('click', () => markerDialog.classList.remove('active'));
-  if (markerDialogCancel) markerDialogCancel.addEventListener('click', () => markerDialog.classList.remove('active'));
-
-  if (markerForm) {
-    markerForm.addEventListener('submit', function(e) {
-      e.preventDefault();
-      const lat = parseFloat(markerLat.value);
-      const lon = parseFloat(markerLon.value);
-      const label = markerLabel.value.trim();
-      const bandType = markerBandType.value;
-      const date = markerDate.value.trim();
-      const comment = markerComment.value.trim();
-
-      if (isNaN(lat) || lat < -90 || lat > 90) { alert('Latitude must be between -90 and 90'); return; }
-      if (isNaN(lon) || lon < -180 || lon > 180) { alert('Longitude must be between -180 and 180'); return; }
-      if (!label) { alert('Label is required'); return; }
-
-      const lonNorm = normLon(lon);
-
-      if (contextMenuMode === 'marker' && selectedMarkerData) {
-        const md = selectedMarkerData;
-        md.lat = lat; md.lon = lonNorm; md.label = label; md.band_type = bandType; md.date = date; md.comment = comment;
-        md.marker.setLatLng([lat, lonNorm]);
-        md.marker.setIcon(buildMarkerIcon(bandType));
-        md.marker.options.title = label;
-        updateMarkerPopup(md);
-      } else {
-        const marker = makeMarker(lat, lonNorm, bandType, label);
-        const latBin = Math.floor((lat + 90) / 10) * 10 - 90;
-        const lonBin = Math.floor((lonNorm + 180) / 10) * 10 - 180;
-        const newMarkerData = {
-          marker, band_type: bandType, lat, lon: lonNorm, label, date, comment,
-          allFields: { lat, lon: lonNorm, label, band_type: bandType, date, comment, lat_bin: latBin, lon_bin: lonBin }
-        };
-        updateMarkerPopup(newMarkerData);
-        attachMarkerContextMenu(marker, newMarkerData);
-        markersData.push(newMarkerData);
-      }
-
-      markerDialog.classList.remove('active');
-      refreshAfterDataChange();
-    });
-  }
-
-  function updateMarkerPopup(md) {
-    const rowsHtml = Object.keys(md.allFields).map(k => {
-      return `<tr><th style="text-align:left; padding-right:8px; vertical-align:top;">${escapeHTML(k)}</th>` +
-             `<td style="white-space:pre-wrap; max-width:260px;">${escapeHTML(md.allFields[k])}</td></tr>`;
-    }).join('');
-    const popupHtml = `<div style="font-size:13px; line-height:1.35;"><table>${rowsHtml}</table></div>`;
-    md.marker.bindPopup(popupHtml, { maxWidth: 320, autoPan: true });
-  }
-
-// PATCH 2: In refreshAfterDataChange(), call updateBandCountsInFilters() after recomputing counts
-
-function refreshAfterDataChange() {
-  legendCounts = { ring: 0, stripe: 0, both: 0, none: 0 };
-  for (const data of markersData) legendCounts[data.band_type] = (legendCounts[data.band_type] || 0) + 1;
-
-  const csvRows = markersData.map(data => {
-    const latBin = Math.floor((data.lat + 90) / 10) * 10 - 90;
-    const lonBin = Math.floor((data.lon + 180) / 10) * 10 - 180;
-    return { lat: data.lat, lon: data.lon, label: data.label, band_type: data.band_type, date: data.date || '', comment: data.comment || '', lat_bin: latBin, lon_bin: lonBin };
-  });
-  normalizedCSV = 'lat,lon,label,band_type,lat_bin,lon_bin\n' +
-    csvRows.map(r => [r.lat, r.lon, `"${(r.label + '').replace(/"/g, '""')}"`, r.band_type, r.lat_bin, r.lon_bin].join(',')).join('\n');
-
-  if (skipReport) skipReport.textContent = '';
-
-  addMarkersAndShading();
-
-  // IMPORTANT: refresh the counters in the UI after edits/adds
-  updateBandCountsInFilters();
-}
-
-  document.addEventListener('click', hideContextMenu);
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape') {
-      hideContextMenu();
-      if (markerDialog && markerDialog.classList.contains('active')) markerDialog.classList.remove('active');
-    }
-  });
-  map.on('movestart', hideContextMenu);
-
-  // ===== Save As implementation =====
-  function openCsvModal(defaultName) {
-    const base = currentCsvBaseName || 'bands';
-    saveCsvName.value = defaultName || `${base}_${todayStamp()}.csv`;
-    saveCsvModal.classList.add('active');
-    saveCsvModal.style.display = 'flex';
-  }
-  function closeCsvModal() {
-    saveCsvModal.classList.remove('active');
-    saveCsvModal.style.display = 'none';
-  }
-  function openPicModal(defaultName, defaultFmt = 'png') {
-    savePicName.value = defaultName || (currentCsvBaseName || 'map');
-    savePicFormat.value = defaultFmt;
-    savePicModal.classList.add('active');
-    savePicModal.style.display = 'flex';
-  }
-  function closePicModal() {
-    savePicModal.classList.remove('active');
-    savePicModal.style.display = 'none';
-  }
-
-  // Save As menu
-  if (saveAsBtn) {
-    saveAsBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const isOpen = saveAsMenu.style.display === 'block';
-      saveAsMenu.style.display = isOpen ? 'none' : 'block';
-      const rect = saveAsBtn.getBoundingClientRect();
-      saveAsMenu.style.left = `${rect.left}px`;
-      saveAsMenu.style.top = `${rect.bottom + 4}px`;
-    });
-  }
-  if (saveAsCsvBtn) {
-    saveAsCsvBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      saveAsMenu.style.display = 'none';
-      const def = `${(currentCsvBaseName || 'bands')}_${todayStamp()}.csv`;
-      openCsvModal(def);
-    });
-  }
-  if (saveAsPicBtn) {
-    saveAsPicBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      saveAsMenu.style.display = 'none';
-      openPicModal(`${currentCsvBaseName || 'map'}`, 'png');
-    });
-  }
-  if (saveAsMenu) {
-    saveAsMenu.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const btn = e.target.closest('button');
-      if (!btn) return;
-      if (btn.id === 'saveAsCsvBtn') {
-        saveAsMenu.style.display = 'none';
-        const def = `${(currentCsvBaseName || 'bands')}_${todayStamp()}.csv`;
-        openCsvModal(def);
-      } else if (btn.id === 'saveAsPicBtn') {
-        saveAsMenu.style.display = 'none';
-        openPicModal(`${currentCsvBaseName || 'map'}`, 'png');
-      }
-    });
-  }
-  document.addEventListener('click', (e) => {
-    if (saveAsMenu && e.target !== saveAsMenu && !saveAsMenu.contains(e.target) && e.target !== saveAsBtn) {
-      saveAsMenu.style.display = 'none';
-    }
-  });
-
-  // CSV Modal actions
-  if (saveCsvCancel) saveCsvCancel.addEventListener('click', closeCsvModal);
-  if (saveCsvClose) saveCsvClose.addEventListener('click', closeCsvModal);
-  if (saveCsvOk) {
-    saveCsvOk.addEventListener('click', () => {
-      const nameRaw = (saveCsvName.value || '').trim();
-      if (!nameRaw) { alert('Please enter a file name.'); return; }
-      let fname = nameRaw;
-      if (!/\.(csv)$/i.test(fname)) fname += '.csv';
-      if (!normalizedCSV) {
-        if (typeof refreshAfterDataChange === 'function') refreshAfterDataChange();
-        if (!normalizedCSV) { alert('There is no data to save.'); return; }
-      }
-      const blob = new Blob([normalizedCSV], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = fname;
-      document.body.appendChild(a); a.click();
-      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
-      closeCsvModal();
-    });
-  }
-
-  // Screenshot helpers
-  async function whenTilesReady(layer) {
-    if (!layer || !layer._loading) return;
-    await new Promise(resolve => layer.once('load', resolve));
-  }
-  async function settleFrames(n = 2) { for (let i = 0; i < n; i++) await new Promise(r => requestAnimationFrame(() => r())); }
-  async function prepareForScreenshot() {
-    if (typeof addMarkersAndShading === 'function') addMarkersAndShading();
-    if (typeof rebuildBandLabels === 'function') rebuildBandLabels();
-    await whenTilesReady(tiles);
-    await settleFrames(2);
-  }
-  function getBandStatsText() {
-    try {
-      const ringsVisited = shadedLatBands?.size ?? 0;
-      const stripesVisited = shadedLonBands?.size ?? 0;
-      const ringPct = ((ringsVisited / (RING_BAND_COUNT || 18)) * 100).toFixed(1);
-      const stripePct = ((stripesVisited / (STRIPE_BAND_COUNT || 36)) * 100).toFixed(1);
-      return `Rings: ${ringsVisited}/${RING_BAND_COUNT || 18} (${ringPct}%)  Stripes: ${stripesVisited}/${STRIPE_BAND_COUNT || 36} (${stripePct}%)`;
-    } catch {
-      return `Rings: 0/18 (0.0%)  Stripes: 0/36 (0.0%)`;
-    }
-  }
-  function injectScreenshotStatsBadge() {
-    const container = map.getContainer();
-    const badge = document.createElement('div');
-    badge.className = 'map-screenshot-stats';
-    badge.textContent = getBandStatsText();
-    const mapSize = map.getSize();
-    const leftBoundaryLon = -160; // stripe 2 left edge
-    const refLat = 0;
-    const leftPx = Math.round(map.latLngToContainerPoint([refLat, leftBoundaryLon]).x) + 4;
-    const maxLeft = Math.max(4, Math.min(leftPx, mapSize.x - 160));
-    badge.style.left = `${maxLeft}px`;
-    badge.style.position = 'absolute';
-    badge.style.bottom = '8px';
-    container.appendChild(badge);
-    return () => { try { container.removeChild(badge); } catch {} };
-  }
-
-  // Picture Modal actions
-  if (savePicCancel) savePicCancel.addEventListener('click', closePicModal);
-  if (savePicClose) savePicClose.addEventListener('click', closePicModal);
-  if (savePicOk) {
-    savePicOk.addEventListener('click', async () => {
-      const base = (savePicName.value || '').trim() || (currentCsvBaseName || 'map');
-      let fmt = (savePicFormat.value || 'png').toLowerCase();
-      const mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' };
-      const mime = mimeMap[fmt] || 'image/png';
-      if (!(fmt in mimeMap)) { alert('Selected format is not natively supported by the browser; exporting as PNG instead.'); fmt = 'png'; }
-      let filename = base;
-      if (!filename.toLowerCase().endsWith(`.${fmt}`)) filename += `.${fmt}`;
-      if (typeof html2canvas === 'undefined') { alert('Screenshot library not loaded.'); return; }
-
-      try {
-        await prepareForScreenshot();
-        const removeStats = injectScreenshotStatsBadge();
-
-        const canvas = await html2canvas(mapDiv, {
-          useCORS: true,
-          backgroundColor: null,
-          scale: window.devicePixelRatio || 1,
-          logging: false
-        });
-
-        removeStats();
-
-        canvas.toBlob((blob) => {
-          if (!blob) { alert('Failed to create image.'); return; }
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url; a.download = filename;
-          document.body.appendChild(a); a.click();
-          setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
-        }, mime, mime === 'image/jpeg' ? 0.92 : undefined);
-      } catch (err) {
-        console.error(err);
-        alert('Could not capture the map. If tiles are blocked by CORS, try again or use PNG/JPEG.');
-      } finally {
-        closePicModal();
-      }
-    });
-  }
-
-});
+          return assigned;
+        }
+      } // <-- Close updateLabelOverlay
+    
+    }); // <-- Close DOMContentLoaded event listener
